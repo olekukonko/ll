@@ -402,10 +402,11 @@ func (l *Logger) Use(fn lx.Handler) *Middleware {
 }
 
 // Separator is use to group namespaces and log entries.
-func (l *Logger) Separator(separator string) {
+func (l *Logger) Separator(separator string) *Logger {
 	l.mu.Lock()
 	l.mu.Unlock()
 	l.separator = separator
+	return l
 }
 
 // Remove removes middleware by the reference returned from Use.
