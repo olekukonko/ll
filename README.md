@@ -1,11 +1,11 @@
 # ll - A Modern Structured Logging Library for Go
 
-`ll` is a production-ready logging library designed for complex applications needing:
+`ll` is a production-ready logging library designed for Go applications requiring:
 - **Hierarchical namespaces** for fine-grained log control
 - **Structured logging** with rich metadata
-- **Middleware pipeline** for log processing
-- **Conditional logging** to reduce overhead
-- **Multiple output formats** (text, color, JSON, slog)
+- **Middleware pipeline** for customizable log processing
+- **Conditional logging** to optimize performance
+- **Multiple output formats** (text, colorized, JSON, slog)
 
 ## Installation
 
@@ -13,195 +13,221 @@
 go get github.com/olekukonko/ll
 ```
 
-## Core Features
+## Getting Started
 
-### 1. Namespace Hierarchy with Granular Control
+`ll` provides a simple yet powerful API for logging. Below is a basic example to get started:
 
 ```go
 package main
 
 import (
     "github.com/olekukonko/ll"
+    "github.com/olekukonko/ll/lh"
     "os"
 )
 
 func main() {
-    // Create root logger for "app" namespace
-    logger := ll.New("app").
-        SetHandler(ll.NewColorizedHandler(os.Stdout)).
-        Enable()
+    // Create a logger with namespace "app"
+    logger := ll.New("app").Enable().Handler(lh.NewTextHandler(os.Stdout))
 
-    // Child loggers inherit parent config
-    dbLogger := logger.Namespace("db")
-    apiLogger := logger.Namespace("api").SetStyle(ll.NestedPath)
+    // Log a simple message
+    logger.Info("Application started") // Output: [app] INFO: Application started
 
-    // Enable only critical paths
-    logger.NamespaceDisable("app")      // Disable root
-    logger.NamespaceEnable("app/db")    // Enable only DB logs
-    logger.NamespaceEnable("app/api/v1") // Enable API v1
+    // Add structured fields
+    logger.Fields("user", "alice").Info("User logged in") // Output: [app] INFO: User logged in [user=alice]
 
-    dbLogger.Info("Database query")      // Logs: [app/db] INFO: Database query
-    apiLogger.Info("API request")        // Doesn't log (api not enabled)
-    apiLogger.Namespace("v1").Info("v1 request") // Logs: [app] -> [api] -> [v1] : INFO: v1 request
+    // Conditional logging
+    debugMode := false
+    logger.If(debugMode).Debug("Debug info") // No output (debugMode is false)
 }
 ```
 
-### 2. Middleware Pipeline (Chi-style)
+## Core Features
 
+### 1. Hierarchical Namespaces
+
+Namespaces allow you to organize logs hierarchically, enabling precise control over which parts of your application produce logs. This is ideal for large systems with multiple components.
+
+**Advantages of Namespaces**:
+- **Granular Control**: Enable or disable logging for specific subsystems (e.g., "app/db" vs. "app/api").
+- **Hierarchical Organization**: Group related logs under parent namespaces (e.g., "app/db/queries").
+- **Scalability**: Manage log volume in complex applications by selectively enabling namespaces.
+- **Readability**: Clear namespace paths improve log traceability.
+
+**Basic Example**:
 ```go
-// Auth middleware - adds user context
-authMiddleware := func(e *ll.Entry) bool {
+logger := ll.New("app").Enable().Handler(lh.NewTextHandler(os.Stdout))
+
+// Create child loggers
+dbLogger := logger.Namespace("db")
+apiLogger := logger.Namespace("api").Style(lx.NestedPath)
+
+// Enable specific namespaces
+logger.NamespaceEnable("app/db")    // Enable DB logs
+logger.NamespaceDisable("app/api")  // Disable API logs
+
+dbLogger.Info("Query executed")     // Output: [app/db] INFO: Query executed
+apiLogger.Info("Request received")  // No output
+```
+
+### 2. Middleware Pipeline
+
+The middleware pipeline allows you to process logs before they are output, using an error-based rejection mechanism (non-nil errors stop logging). This enables custom filtering, transformation, or enrichment.
+
+**Basic Example**:
+```go
+logger := ll.New("app").Enable().Handler(lh.NewTextHandler(os.Stdout))
+
+// Add middleware to enrich logs
+logger.Use(ll.Middle(func(e *lx.Entry) error {
     if e.Fields == nil {
         e.Fields = make(map[string]interface{})
     }
-    e.Fields["user"] = "current_user"
-    return true
-}
+    e.Fields["app"] = "myapp"
+    return nil
+}))
 
-// Rate limiting middleware
-rateLimitMiddleware := func(e *ll.Entry) bool {
-    if e.Level == ll.LevelDebug {
-        return rand.Float32() < 0.1 // Sample 10% of debug logs
+// Filter low-level logs
+logger.Use(ll.Middle(func(e *lx.Entry) error {
+    if e.Level < lx.LevelWarn {
+        return fmt.Errorf("level too low")
     }
-    return true
-}
+    return nil
+}))
 
-logger.Use(authMiddleware)
-logger.Use(rateLimitMiddleware)
-
-logger.Debug("Debug message") // 10% chance with user field
-logger.Info("User action")    // Always logs with user field
+logger.Info("Ignored") // No output (filtered by middleware)
+logger.Warn("Warning") // Output: [app] WARN: Warning [app=myapp]
 ```
 
-### 3. Conditional Logging (Zero-cost when disabled)
+### 3. Conditional Logging
 
+Conditional logging skips expensive operations when conditions are false, improving performance in production environments.
+
+**Basic Example**:
 ```go
-// Expensive debug case
-logger.If(config.DebugMode).
-    Fields("state", expensiveStateDump()).
-    Debug("System state")
+logger := ll.New("app").Enable().Handler(lh.NewTextHandler(os.Stdout))
 
-// Feature flag logging
-logger.If(featureFlags.EnableAuditLog).
-    Fields("action", "delete", "target", resource).
-    Info("Audit event")
-
-// Error handling
-err := dangerousOperation()
-logger.If(err != nil).
-    Fields("error", err).
-    Error("Operation failed")
+// Log only if condition is true
+featureEnabled := true
+logger.If(featureEnabled).Fields("action", "update").Info("Feature used") // Output: [app] INFO: Feature used [action=update]
+logger.If(false).Info("Ignored") // No output, no processing
 ```
 
-### 4. Structured Logging with Fluent API
+### 4. Structured Logging
 
+Structured logging adds key-value metadata to logs, making them machine-readable and easier to query.
+
+**Basic Example**:
 ```go
-// Variadic fields
-logger.Fields(
-    "user", userID,
-    "request_id", requestID,
-    "latency_ms", latency,
-).Info("Request completed")
+logger := ll.New("app").Enable().Handler(lh.NewTextHandler(os.Stdout))
 
-// Map fields (type-safe)
-logger.Field(map[string]interface{}{
-    "user":       user{Name: "Alice", ID: 123},
-    "http_status": http.StatusOK,
-}).Debug("Response")
+// Add fields with variadic pairs
+logger.Fields("user", "bob", "status", 200).Info("Request completed") // Output: [app] INFO: Request completed [user=bob status=200]
 
-// Chained fields
-logger.
-    Field(map[string]interface{}{"base": "data"}).
-    Fields("extra", "info").
-    Info("Chained fields")
+// Add fields from a map
+logger.Field(map[string]interface{}{"method": "GET"}).Info("Request") // Output: [app] INFO: Request [method=GET]
 ```
 
-### 5. Advanced Output Control
+### 5. Multiple Output Formats
 
+`ll` supports various output formats, including human-readable text, colorized logs, JSON, and compatibility with Go’s `slog`.
+
+**Basic Example**:
 ```go
-// Multi-destination logging
-logger.SetHandler(ll.NewMultiHandler(
-    // Human-readable to console
-    ll.NewColorizedHandler(os.Stdout),
-    
-    // Machine-readable to file
-    ll.NewJSONHandler(logFile, time.RFC3339),
-    
-    // Send to existing slog handler
-    ll.NewSlogHandler(slog.NewJSONHandler(os.Stderr, nil)),
-)
+logger := ll.New("app").Enable()
 
-// Rate limiting noisy logs
-logger.SetRateLimit(ll.LevelWarn, 5, time.Minute) // Max 5 warnings/minute
+// Text output
+logger.Handler(lh.NewTextHandler(os.Stdout))
+logger.Info("Text log") // Output: [app] INFO: Text log
 
-// Sample debug logs in production
-logger.SetSampling(ll.LevelDebug, 0.01) // 1% of debug logs
+// JSON output
+logger.Handler(lh.NewJSONHandler(os.Stdout, time.RFC3339Nano))
+logger.Info("JSON log") // Output: {"timestamp":"...","level":"INFO","message":"JSON log","namespace":"app"}
 ```
 
 ## Real-world Use Case
 
-```go
-func NewAPIService(logger *ll.Logger) *APIService {
-    // Create service-specific logger
-    svcLogger := logger.Namespace("api").SetStyle(ll.NestedPath)
-    
-    // Add service-wide context
-    svcLogger.Use(func(e *ll.Entry) bool {
-        e.Fields["service"] = "api"
-        e.Fields["version"] = "v2"
-        return true
-    })
-    
-    return &APIService{logger: svcLogger}
-}
+Here’s a practical example of using `ll` in a web server:
 
-func (s *APIService) HandleRequest(r *http.Request) {
-    start := time.Now()
-    
-    // Conditional debug logging
-    s.logger.If(s.debugMode).
-        Fields("headers", r.Header).
-        Debug("Request received")
-    
-    // Process request...
-    
-    s.logger.Fields(
-        "method", r.Method,
-        "path", r.URL.Path,
-        "duration_ms", time.Since(start).Milliseconds(),
-    ).Info("Request processed")
-    
-    if err := process(); err != nil {
-        s.logger.
-            Fields("error", err).
-            Stack("Processing failed") // Includes stack trace
-    }
+```go
+package main
+
+import (
+    "github.com/olekukonko/ll"
+    "github.com/olekukonko/ll/lh"
+    "net/http"
+    "os"
+    "time"
+)
+
+func main() {
+    logger := ll.New("server").Enable().Handler(lh.NewTextHandler(os.Stdout))
+
+    // Create a child logger for HTTP requests
+    httpLogger := logger.Namespace("http").Style(lx.NestedPath)
+
+    // Add middleware to include request ID
+    httpLogger.Use(ll.Middle(func(e *lx.Entry) error {
+        if e.Fields == nil {
+            e.Fields = make(map[string]interface{})
+        }
+        e.Fields["request_id"] = "req-" + time.Now().String()
+        return nil
+    }))
+
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        httpLogger.Fields("method", r.Method, "path", r.URL.Path).Info("Request received")
+        w.Write([]byte("Hello, world!"))
+        httpLogger.Fields("duration_ms", time.Since(start).Milliseconds()).Info("Request completed")
+    })
+
+    logger.Info("Starting server on :8080")
+    http.ListenAndServe(":8080", nil)
 }
+```
+
+**Sample Output**:
+```
+[server] INFO: Starting server on :8080
+[server]→[http]: INFO: Request received [method=GET path=/ request_id=req-...]
+[server]→[http]: INFO: Request completed [duration_ms=1 request_id=req-...]
 ```
 
 ## Why Choose `ll`?
 
-1. **Precise Control**: Enable/disable specific namespace trees
-2. **Zero-cost Abstraction**: `If()` prevents expensive field computation
-3. **Extensible**: Middleware transforms logs before output
-4. **Production-ready**: Rate limiting and sampling
-5. **Flexible Output**: Multiple formats and destinations
-6. **Thread-safe**: Ready for concurrent use
+1. **Granular Namespace Control**: Enable or disable specific subsystems (e.g., "app/db") for precise log management.
+2. **Performance Optimization**: Conditional logging (`If`) skips expensive computations when disabled.
+3. **Extensible Middleware**: Transform or filter logs with error-based rejection (non-nil errors stop logging).
+4. **Structured Logging**: Add key-value metadata for machine-readable logs.
+5. **Flexible Outputs**: Support for text, JSON, colorized, and slog handlers.
+6. **Thread-safe**: Built for concurrent use with mutex-protected state.
+7. **Robust Testing**: Comprehensive test suite with recent fixes (e.g., sampling reliability) and extensive documentation.
+
+## Advantages of Namespaces
+
+Namespaces are a standout feature of `ll`, offering:
+- **Selective Logging**: Enable logs for specific components (e.g., "app/db") while disabling others (e.g., "app/api"), reducing noise in large systems.
+- **Hierarchical Filtering**: Control entire subsystems (e.g., disable "app" to suppress all child logs like "app/db" and "app/api").
+- **Improved Debugging**: Trace logs to specific parts of the application (e.g., "app/db/queries") for faster issue identification.
+- **Production Scalability**: Disable verbose namespaces in production to manage log volume without code changes.
 
 ## Benchmarks
 
 Compared to standard library `log` and `slog`:
-- 30% faster than `slog` for disabled logs
-- 2x faster than `log` for structured logging
-- Minimal allocation overhead
+- 30% faster than `slog` for disabled logs due to efficient conditional checks.
+- 2x faster than `log` for structured logging with minimal allocations.
+- Optimized namespace caching and middleware processing reduce overhead.
 
-See benchmark details in the package tests.
-```
+See `ll_bench_test.go` for detailed benchmarks on namespace creation, cloning, and field building.
 
-Key improvements:
-1. **Namespace Control**: Shows hierarchical enable/disable with different styles
-2. **Middleware**: Demonstrates real-world auth and sampling use cases
-3. **Conditional**: Highlights performance benefits for debug/feature flags
-4. **Structured**: Shows both variadic and type-safe field options
-5. **Real Example**: Complete API service implementation
-6. **Benefits**: Clear "Why Choose" section highlighting advantages
+## Testing and Stability
+
+The library includes a robust test suite (`ll_test.go`) covering:
+- Logger configuration, namespaces, and conditional logging.
+- Middleware, rate limiting, and sampling (fixed for reliable behavior at 0.0 and 1.0 rates).
+- Handler output formats and error handling.
+
+Recent improvements include:
+- Fixed sampling middleware to ensure correct filtering (issue resolved in `TestSampling`).
+- Enhanced documentation with detailed comments in `conditional.go`, `field.go`, `global.go`, `ll.go`, `lx.go`, and `ns.go`.

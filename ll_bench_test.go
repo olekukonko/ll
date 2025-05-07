@@ -2,6 +2,7 @@ package ll
 
 import (
 	"fmt"
+	"github.com/olekukonko/ll/lh"
 	"io"
 	"testing"
 )
@@ -10,7 +11,7 @@ import (
 // Each iteration creates a new child logger with a unique namespace and logs a message.
 func BenchmarkNamespaceLoop(b *testing.B) {
 	logger := New("app")
-	logger.SetHandler(NewTextHandler(io.Discard))
+	logger.Handler(lh.NewTextHandler(io.Discard))
 	logger.Enable()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -23,7 +24,7 @@ func BenchmarkNamespaceLoop(b *testing.B) {
 // Loggers are pre-created, and only logging is performed in the loop.
 func BenchmarkNamespaceCached(b *testing.B) {
 	logger := New("app")
-	logger.SetHandler(NewTextHandler(io.Discard))
+	logger.Handler(lh.NewTextHandler(io.Discard))
 	logger.Enable()
 	childLoggers := make([]*Logger, b.N)
 	for i := 0; i < b.N; i++ {
@@ -39,7 +40,7 @@ func BenchmarkNamespaceCached(b *testing.B) {
 // Each iteration creates a new logger with the same namespace and logs a message.
 func BenchmarkCloneLoop(b *testing.B) {
 	logger := New("app")
-	logger.SetHandler(NewTextHandler(io.Discard))
+	logger.Handler(lh.NewTextHandler(io.Discard))
 	logger.Enable()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -52,7 +53,7 @@ func BenchmarkCloneLoop(b *testing.B) {
 // Each iteration creates a new logger with embedded fields and logs a message.
 func BenchmarkFieldsLoggerLoop(b *testing.B) {
 	logger := New("app")
-	logger.SetHandler(NewTextHandler(io.Discard))
+	logger.Handler(lh.NewTextHandler(io.Discard))
 	logger.Enable()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -65,7 +66,7 @@ func BenchmarkFieldsLoggerLoop(b *testing.B) {
 // Each iteration modifies the logger’s prefix and logs a message.
 func BenchmarkPrefixLoop(b *testing.B) {
 	logger := New("app")
-	logger.SetHandler(NewTextHandler(io.Discard))
+	logger.Handler(lh.NewTextHandler(io.Discard))
 	logger.Enable()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -78,7 +79,7 @@ func BenchmarkPrefixLoop(b *testing.B) {
 // Each iteration modifies the logger’s indentation level and logs a message.
 func BenchmarkIndentLoop(b *testing.B) {
 	logger := New("app")
-	logger.SetHandler(NewTextHandler(io.Discard))
+	logger.Handler(lh.NewTextHandler(io.Discard))
 	logger.Enable()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

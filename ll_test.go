@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/olekukonko/ll/lh"
+	"github.com/olekukonko/ll/lm"
+	"github.com/olekukonko/ll/lx"
 	"log/slog"
 	"os"
 	"strings"
@@ -17,14 +20,12 @@ import (
 func TestMain(m *testing.M) {
 	// Initialize defaultLogger with default values
 	defaultLogger = &Logger{
-		enabled:     defaultEnabled,
-		level:       LevelDebug,
-		namespaces:  defaultStore,
-		context:     make(map[string]interface{}),
-		style:       FlatPath,
-		handler:     nil,
-		rateLimits:  make(map[Level]*rateLimit),
-		sampleRates: make(map[Level]float64),
+		enabled:    lx.DefaultEnabled,
+		level:      lx.LevelDebug,
+		namespaces: defaultStore,
+		context:    make(map[string]interface{}),
+		style:      lx.FlatPath,
+		handler:    nil,
 	}
 	// Run tests and exit with the appropriate status code
 	os.Exit(m.Run())
@@ -33,36 +34,35 @@ func TestMain(m *testing.M) {
 // TestLoggerConfiguration verifies the basic configuration methods of the Logger.
 func TestLoggerConfiguration(t *testing.T) {
 	// Create a new logger with namespace "test"
-	logger := New("test")
-	logger.Enable()
+	logger := New("test").Enable()
 
 	// Test Enable/Disable functionality
-	logger.Disable()
+	logger = logger.Disable()
 	logger.Info("Should not log") // Should be ignored since logger is disabled
 	if logger.enabled {
 		t.Errorf("Expected enabled=false, got %v", logger.enabled)
 	}
-	logger.Enable()
+	logger = logger.Enable()
 	if !logger.enabled {
 		t.Errorf("Expected enabled=true, got %v", logger.enabled)
 	}
 
-	// Test SetLevel functionality
-	logger.SetLevel(LevelWarn)
-	if logger.level != LevelWarn {
-		t.Errorf("Expected level=%v, got %v", LevelWarn, logger.level)
+	// Test Level functionality
+	logger = logger.Level(lx.LevelWarn)
+	if logger.level != lx.LevelWarn {
+		t.Errorf("Expected level=%v, got %v", lx.LevelWarn, logger.level)
 	}
 	logger.Info("Should not log") // Below Warn level, should be ignored
 	logger.Warn("Should log")     // At Warn level, should be processed
 
-	// Test SetStyle functionality
-	logger.SetStyle(NestedPath)
-	if logger.style != NestedPath {
-		t.Errorf("Expected style=%v, got %v", NestedPath, logger.style)
+	// Test Style functionality
+	logger = logger.Style(lx.NestedPath)
+	if logger.style != lx.NestedPath {
+		t.Errorf("Expected style=%v, got %v", lx.NestedPath, logger.style)
 	}
-	logger.SetStyle(FlatPath)
-	if logger.style != FlatPath {
-		t.Errorf("Expected style=%v, got %v", FlatPath, logger.style)
+	logger = logger.Style(lx.FlatPath)
+	if logger.style != lx.FlatPath {
+		t.Errorf("Expected style=%v, got %v", lx.FlatPath, logger.style)
 	}
 }
 
@@ -70,10 +70,7 @@ func TestLoggerConfiguration(t *testing.T) {
 func TestLoggingMethods(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("test")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetLevel(LevelDebug)
+	logger := New("test").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug)
 
 	// Test Debug logging
 	buf.Reset()
@@ -122,9 +119,7 @@ func TestLoggingMethods(t *testing.T) {
 func TestBuilderFields(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("test")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
+	logger := New("test").Enable().Handler(lh.NewTextHandler(buf))
 
 	// Test variadic Fields with multiple key-value pairs
 	buf.Reset()
@@ -161,9 +156,7 @@ func TestHandlers(t *testing.T) {
 	// Test TextHandler for plain text output
 	t.Run("TextHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		logger := New("test")
-		logger.Enable()
-		logger.SetHandler(NewTextHandler(buf))
+		logger := New("test").Enable().Handler(lh.NewTextHandler(buf))
 		logger.Fields("key", "value").Info("Test text")
 		if !strings.Contains(buf.String(), "[test] INFO: Test text [key=value]") {
 			t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test text [key=value]")
@@ -173,9 +166,7 @@ func TestHandlers(t *testing.T) {
 	// Test ColorizedHandler for ANSI-colored output
 	t.Run("ColorizedHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		logger := New("test")
-		logger.Enable()
-		logger.SetHandler(NewColorizedHandler(buf))
+		logger := New("test").Enable().Handler(lh.NewColorizedHandler(buf))
 		logger.Fields("key", "value").Info("Test color")
 		// Check for namespace presence, ignoring ANSI codes
 		if !strings.Contains(buf.String(), "[test]") {
@@ -186,9 +177,7 @@ func TestHandlers(t *testing.T) {
 	// Test JSONHandler for structured JSON output
 	t.Run("JSONHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		logger := New("test")
-		logger.Enable()
-		logger.SetHandler(NewJSONHandler(buf, ""))
+		logger := New("test").Enable().Handler(lh.NewJSONHandler(buf, ""))
 		logger.Fields("key", "value").Info("Test JSON")
 		// Parse JSON output and verify fields
 		var data map[string]interface{}
@@ -212,9 +201,7 @@ func TestHandlers(t *testing.T) {
 	// Test SlogHandler for compatibility with slog
 	t.Run("SlogHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		logger := New("test")
-		logger.Enable()
-		logger.SetHandler(NewSlogHandler(slog.NewTextHandler(buf, nil)))
+		logger := New("test").Enable().Handler(lh.NewSlogHandler(slog.NewTextHandler(buf, nil)))
 		logger.Fields("key", "value").Info("Test slog")
 		output := buf.String()
 		if !strings.Contains(output, "level=INFO") {
@@ -235,11 +222,9 @@ func TestHandlers(t *testing.T) {
 	t.Run("MultiHandler", func(t *testing.T) {
 		buf1 := &bytes.Buffer{}
 		buf2 := &bytes.Buffer{}
-		logger := New("test")
-		logger.Enable()
-		logger.SetHandler(NewMultiHandler(
-			NewTextHandler(buf1),
-			NewJSONHandler(buf2, ""),
+		logger := New("test").Enable().Handler(lh.NewMultiHandler(
+			lh.NewTextHandler(buf1),
+			lh.NewJSONHandler(buf2, ""),
 		))
 		logger.Fields("key", "value").Info("Test multi")
 		// Verify TextHandler output
@@ -259,15 +244,15 @@ func TestHandlers(t *testing.T) {
 
 // TestNamespaces verifies namespace-related functionality, including child namespaces and enable/disable behavior.
 func TestNamespaces(t *testing.T) {
+	// Debug: Verify Arrow constant
+	fmt.Printf("Arrow constant: %q\n", lx.Arrow)
+
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("parent")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
+	logger := New("parent").Enable().Handler(lh.NewTextHandler(buf))
 
 	// Test child namespace creation and logging
-	child := logger.Namespace("child")
-	child.Enable()
+	child := logger.Namespace("child").Enable()
 	buf.Reset()
 	child.Info("Child log")
 	if !strings.Contains(buf.String(), "[parent/child] INFO: Child log") {
@@ -275,16 +260,17 @@ func TestNamespaces(t *testing.T) {
 	}
 
 	// Test NestedPath style formatting
-	logger.SetStyle(NestedPath)
-	child.SetStyle(NestedPath)
+	logger = logger.Style(lx.NestedPath)
+	child = child.Style(lx.NestedPath)
 	buf.Reset()
 	child.Info("Nested log")
-	if !strings.Contains(buf.String(), "[parent] -> [child] : INFO: Nested log") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[parent] -> [child] : INFO: Nested log")
+	expectedNested := "[parent]" + lx.Arrow + "[child]" + lx.Colon + lx.Space + "INFO: Nested log"
+	if !strings.Contains(buf.String(), expectedNested) {
+		t.Errorf("Expected %q to contain %q; got %q", buf.String(), expectedNested, buf.String())
 	}
 
 	// Test NamespaceEnable/NamespaceDisable to verify logging behavior
-	logger.NamespaceDisable("parent/child")
+	logger = logger.NamespaceDisable("parent/child")
 	// Debug namespace state before logging
 	enabled, ok := child.namespaces.Load("parent/child")
 	fmt.Printf("Namespace parent/child before logging: ok=%v, enabled=%v\n", ok, enabled)
@@ -298,32 +284,30 @@ func TestNamespaces(t *testing.T) {
 	}
 
 	// Re-enable namespace and verify logging
-	logger.NamespaceEnable("parent/child")
-	child.Enable()
+	logger = logger.NamespaceEnable("parent/child")
+	child = child.Enable()
 	buf.Reset()
 	child.Info("Should log")
-	if !strings.Contains(buf.String(), "[parent] -> [child] : INFO: Should log") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[parent] -> [child] : INFO: Should log")
+	expectedShouldLog := "[parent]" + lx.Arrow + "[child]" + lx.Colon + lx.Space + "INFO: Should log"
+	if !strings.Contains(buf.String(), expectedShouldLog) {
+		t.Errorf("Expected %q to contain %q; got %q", buf.String(), expectedShouldLog, buf.String())
 	}
 }
 
 // TestSharedNamespaces verifies namespace state sharing between parent and child loggers.
 func TestSharedNamespaces(t *testing.T) {
 	// Create a fresh parent logger
-	parent := New("parent")
-	parent.Enable()
-	parent.SetHandler(NewTextHandler(os.Stdout))
+	parent := New("parent").Enable().Handler(lh.NewTextHandler(os.Stdout))
 
 	// Disable the child namespace
-	parent.NamespaceDisable("parent/child")
+	parent = parent.NamespaceDisable("parent/child")
 
 	// Create a child logger
-	child := parent.Namespace("child")
-	child.Enable()
+	child := parent.Namespace("child").Enable()
 
 	// Set up a buffer for capturing child logger output
 	buf := &bytes.Buffer{}
-	child.SetHandler(NewTextHandler(buf))
+	child = child.Handler(lh.NewTextHandler(buf))
 
 	// Verify logging is disabled
 	child.Info("Should not log")
@@ -332,7 +316,7 @@ func TestSharedNamespaces(t *testing.T) {
 	}
 
 	// Enable the namespace and verify logging
-	parent.NamespaceEnable("parent/child")
+	parent = parent.NamespaceEnable("parent/child")
 	buf.Reset()
 	child.Info("Should log")
 	if !strings.Contains(buf.String(), "Should log") {
@@ -344,10 +328,8 @@ func TestSharedNamespaces(t *testing.T) {
 func TestRateLimiting(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("test")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetRateLimit(LevelInfo, 2, time.Second)
+	logger := New("test").Enable().Handler(lh.NewTextHandler(buf))
+	logger.Use(lm.NewRateLimiter(lx.LevelInfo, 2, time.Second))
 
 	// Test logging within the rate limit (2 logs allowed)
 	buf.Reset()
@@ -382,12 +364,9 @@ func TestRateLimiting(t *testing.T) {
 
 // TestSampling verifies sampling functionality for a log level.
 func TestSampling(t *testing.T) {
-	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("test")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetSampling(LevelInfo, 0.0) // Never log
+	logger := New("test").Enable().Handler(lh.NewTextHandler(buf)).Clear() // Clear middleware
+	logger.Use(lm.NewSampling(lx.LevelInfo, 0.0))                          // Never log
 
 	// Test logging with 0.0 sampling rate
 	buf.Reset()
@@ -397,7 +376,8 @@ func TestSampling(t *testing.T) {
 	}
 
 	// Test logging with 1.0 sampling rate
-	logger.SetSampling(LevelInfo, 1.0) // Always log
+	logger = New("test").Enable().Handler(lh.NewTextHandler(buf)).Clear() // Fresh logger
+	logger.Use(lm.NewSampling(lx.LevelInfo, 1.0))                         // Always log
 	buf.Reset()
 	logger.Info("Should log")
 	if !strings.Contains(buf.String(), "[test] INFO: Should log") {
@@ -409,22 +389,17 @@ func TestSampling(t *testing.T) {
 func TestConditionalLogging(t *testing.T) {
 	// Reset defaultLogger to ensure clean state
 	defaultLogger = &Logger{
-		enabled:     true,
-		level:       LevelDebug,
-		namespaces:  defaultStore,
-		context:     make(map[string]interface{}),
-		style:       FlatPath,
-		handler:     nil,
-		rateLimits:  make(map[Level]*rateLimit),
-		sampleRates: make(map[Level]float64),
+		enabled:    true,
+		level:      lx.LevelDebug,
+		namespaces: defaultStore,
+		context:    make(map[string]interface{}),
+		style:      lx.FlatPath,
+		handler:    nil,
 	}
 
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("VC")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetLevel(LevelDebug)
+	logger := New("VC").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug)
 
 	// Test false condition with variadic Fields
 	buf.Reset()
@@ -468,25 +443,40 @@ func TestConditionalLogging(t *testing.T) {
 	if !strings.Contains(buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]")
 	}
+
+	// Test Conditional Stack logging with stack trace
+	t.Run("ConditionalStack", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := New("test/app").Enable().Style(lx.NestedPath).Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug).Prefix("ERR: ").Indent(1)
+		logger = logger.Context(map[string]interface{}{"ctx": "value"})
+		logger.If(true).Stack("error occurred: %v", "timeout")
+		expectedStack := "[test]" + lx.Arrow + "[app]" + lx.Colon + lx.Space + "ERROR:   ERR: error occurred: timeout [ctx=value stack="
+		if !strings.Contains(buf.String(), expectedStack) {
+			t.Errorf("Expected %q to contain %q; got %q", buf.String(), expectedStack, buf.String())
+		}
+		buf.Reset()
+		logger.If(false).Stack("should not log: %v", "timeout")
+		if buf.String() != "" {
+			t.Errorf("Expected empty buffer, got %q", buf.String())
+		}
+	})
 }
 
 // TestMiddleware verifies the Use method for adding middleware to process log entries.
 func TestMiddleware(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("test")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetLevel(LevelDebug)
+	logger := New("test").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug)
 
 	// Test middleware that adds a field
-	logger.Use(func(e *Entry) bool {
+	logger = logger.Use(Middle(func(e *lx.Entry) error {
 		if e.Fields == nil {
 			e.Fields = make(map[string]interface{})
 		}
 		e.Fields["extra"] = "value"
-		return true
-	})
+		return nil
+	})).Logger()
+
 	buf.Reset()
 	logger.Info("Test with extra field")
 	if !strings.Contains(buf.String(), "[test] INFO: Test with extra field [extra=value]") {
@@ -494,9 +484,12 @@ func TestMiddleware(t *testing.T) {
 	}
 
 	// Test middleware that filters logs by level
-	logger.Use(func(e *Entry) bool {
-		return e.Level >= LevelWarn
-	})
+	logger = logger.Use(Middle(func(e *lx.Entry) error {
+		if e.Level >= lx.LevelWarn {
+			return nil
+		}
+		return fmt.Errorf("level too low")
+	})).Logger()
 	buf.Reset()
 	logger.Info("Should not log") // Below Warn level, should be ignored
 	if buf.String() != "" {
@@ -509,9 +502,9 @@ func TestMiddleware(t *testing.T) {
 	}
 
 	// Test middleware that skips all logs
-	logger.Use(func(e *Entry) bool {
-		return false
-	})
+	logger = logger.Use(Middle(func(e *lx.Entry) error {
+		return fmt.Errorf("skip all")
+	})).Logger()
 	buf.Reset()
 	logger.Warn("Should not log") // Should be ignored by middleware
 	if buf.String() != "" {
@@ -523,11 +516,7 @@ func TestMiddleware(t *testing.T) {
 func TestClone(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("app")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetLevel(LevelInfo)
-	logger.SetStyle(NestedPath)
+	logger := New("app").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelInfo).Style(lx.NestedPath)
 
 	// Test namespace preservation
 	t.Run("Namespace", func(t *testing.T) {
@@ -543,23 +532,24 @@ func TestClone(t *testing.T) {
 		if !clone.Enabled() {
 			t.Errorf("Expected clone enabled=true, got %v", clone.Enabled())
 		}
-		if clone.Level() != LevelInfo {
-			t.Errorf("Expected clone level=%v, got %v", LevelInfo, clone.Level())
+		if clone.GetLevel() != lx.LevelInfo {
+			t.Errorf("Expected clone level=%v, got %v", lx.LevelInfo, clone.GetLevel())
 		}
-		if clone.style != NestedPath {
-			t.Errorf("Expected clone style=%v, got %v", NestedPath, clone.style)
+		if clone.style != lx.NestedPath {
+			t.Errorf("Expected clone style=%v, got %v", lx.NestedPath, clone.style)
 		}
 	})
 
 	// Test context isolation
 	t.Run("ContextIsolation", func(t *testing.T) {
 		// Update parent logger with context
-		logger = logger.WithContext(map[string]interface{}{"parent": "value"})
+		logger = logger.Context(map[string]interface{}{"parent": "value"})
 		clone := logger.Clone()
 		buf.Reset()
 		clone.Fields("clone", "value").Info("Clone message")
-		if !strings.Contains(buf.String(), "[app] : INFO: Clone message [clone=value]") {
-			t.Errorf("Expected %q to contain %q", buf.String(), "[app] : INFO: Clone message [clone=value]")
+		expected := "[app]" + lx.Colon + lx.Space + "INFO: Clone message [clone=value]"
+		if !strings.Contains(buf.String(), expected) {
+			t.Errorf("Expected %q to contain %q; got %q", buf.String(), expected, buf.String())
 		}
 		if strings.Contains(buf.String(), "parent=value") {
 			t.Errorf("Expected %q not to contain %q", buf.String(), "parent=value")
@@ -570,11 +560,12 @@ func TestClone(t *testing.T) {
 	t.Run("ParentContext", func(t *testing.T) {
 		buf.Reset()
 		logger.Info("Parent message")
+		expected := "[app]" + lx.Colon + lx.Space + "INFO: Parent message [parent=value]"
+		if !strings.Contains(buf.String(), expected) {
+			t.Errorf("Expected %q to contain %q; got %q", buf.String(), expected, buf.String())
+		}
 		if strings.Contains(buf.String(), "clone=value") {
 			t.Errorf("Expected %q not to contain %q", buf.String(), "clone=value")
-		}
-		if !strings.Contains(buf.String(), "[app] : INFO: Parent message [parent=value]") {
-			t.Errorf("Expected %q to contain %q", buf.String(), "[app] : INFO: Parent message [parent=value]")
 		}
 	})
 }
@@ -583,14 +574,11 @@ func TestClone(t *testing.T) {
 func TestPrefix(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("app")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetLevel(LevelInfo)
+	logger := New("app").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelInfo)
 
 	// Test setting a prefix
 	t.Run("SetPrefix", func(t *testing.T) {
-		logger.Prefix("INFO: ")
+		logger = logger.Prefix("INFO: ")
 		buf.Reset()
 		logger.Info("Test message")
 		if !strings.Contains(buf.String(), "[app] INFO: INFO: Test message") {
@@ -600,7 +588,7 @@ func TestPrefix(t *testing.T) {
 
 	// Test updating the prefix
 	t.Run("UpdatePrefix", func(t *testing.T) {
-		logger.Prefix("DEBUG: ")
+		logger = logger.Prefix("DEBUG: ")
 		buf.Reset()
 		logger.Info("Another message")
 		if !strings.Contains(buf.String(), "[app] INFO: DEBUG: Another message") {
@@ -610,7 +598,7 @@ func TestPrefix(t *testing.T) {
 
 	// Test removing the prefix
 	t.Run("RemovePrefix", func(t *testing.T) {
-		logger.Prefix("")
+		logger = logger.Prefix("")
 		buf.Reset()
 		logger.Info("No prefix")
 		if !strings.Contains(buf.String(), "[app] INFO: No prefix") {
@@ -623,14 +611,11 @@ func TestPrefix(t *testing.T) {
 func TestIndent(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
-	logger := New("app")
-	logger.Enable()
-	logger.SetHandler(NewTextHandler(buf))
-	logger.SetLevel(LevelInfo)
+	logger := New("app").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelInfo)
 
 	// Test setting indentation to 2 (4 spaces)
 	t.Run("SetIndent", func(t *testing.T) {
-		logger.Indent(2)
+		logger = logger.Indent(2)
 		buf.Reset()
 		logger.Info("Test message")
 		if !strings.Contains(buf.String(), "[app] INFO:     Test message") {
@@ -640,7 +625,7 @@ func TestIndent(t *testing.T) {
 
 	// Test updating indentation to 1 (2 spaces)
 	t.Run("UpdateIndent", func(t *testing.T) {
-		logger.Indent(1)
+		logger = logger.Indent(1)
 		buf.Reset()
 		logger.Info("Another message")
 		if !strings.Contains(buf.String(), "[app] INFO:   Another message") {
@@ -650,7 +635,7 @@ func TestIndent(t *testing.T) {
 
 	// Test removing indentation
 	t.Run("RemoveIndent", func(t *testing.T) {
-		logger.Indent(0)
+		logger = logger.Indent(0)
 		buf.Reset()
 		logger.Info("No indent")
 		if !strings.Contains(buf.String(), "[app] INFO: No indent") {
@@ -671,22 +656,17 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 func TestHandlerErrors(t *testing.T) {
 	// Reset defaultLogger to ensure clean state
 	defaultLogger = &Logger{
-		enabled:     true,
-		level:       LevelDebug,
-		namespaces:  defaultStore,
-		context:     make(map[string]interface{}),
-		style:       FlatPath,
-		handler:     nil,
-		rateLimits:  make(map[Level]*rateLimit),
-		sampleRates: make(map[Level]float64),
+		enabled:    true,
+		level:      lx.LevelDebug,
+		namespaces: defaultStore,
+		context:    make(map[string]interface{}),
+		style:      lx.FlatPath,
+		handler:    nil,
 	}
 
 	// Test single TextHandler
 	buf := &bytes.Buffer{}
-	logger := New("test")
-	logger.Enable()
-	logger.SetLevel(LevelDebug)
-	logger.SetHandler(NewTextHandler(buf))
+	logger := New("test").Enable().Level(lx.LevelDebug).Handler(lh.NewTextHandler(buf))
 
 	logger.Info("Test single handler")
 	if !strings.Contains(buf.String(), "[test] INFO: Test single handler") {
@@ -695,9 +675,9 @@ func TestHandlerErrors(t *testing.T) {
 
 	// Test MultiHandler with a failing TextHandler
 	buf.Reset()
-	logger.SetHandler(NewMultiHandler(
-		NewTextHandler(buf),
-		NewTextHandler(&failingWriter{}),
+	logger = logger.Handler(lh.NewMultiHandler(
+		lh.NewTextHandler(buf),
+		lh.NewTextHandler(&failingWriter{}),
 	))
 	logger.Info("Test multi error")
 	if !strings.Contains(buf.String(), "[test] INFO: Test multi error") {
@@ -709,11 +689,11 @@ func TestHandlerErrors(t *testing.T) {
 func TestNamespaceToggle(t *testing.T) {
 	// Create a logger and test namespace toggling
 	logger := New("test")
-	logger.NamespaceEnable("parent/child")
+	logger = logger.NamespaceEnable("parent/child")
 	if enabled, ok := logger.namespaces.Load("parent/child"); !ok || !enabled.(bool) {
 		t.Error("parent/child should be enabled")
 	}
-	logger.NamespaceDisable("parent/child")
+	logger = logger.NamespaceDisable("parent/child")
 	if enabled, ok := logger.namespaces.Load("parent/child"); !ok || enabled.(bool) {
 		t.Error("parent/child should be disabled")
 	}
@@ -723,11 +703,11 @@ func TestNamespaceToggle(t *testing.T) {
 func TestTextHandler(t *testing.T) {
 	// Create a buffer and TextHandler
 	var buf bytes.Buffer
-	h := NewTextHandler(&buf)
+	h := lh.NewTextHandler(&buf)
 	// Create a test log entry
-	e := &Entry{
+	e := &lx.Entry{
 		Timestamp: time.Now(),
-		Level:     LevelInfo,
+		Level:     lx.LevelInfo,
 		Message:   "test",
 		Namespace: "",
 		Fields:    map[string]interface{}{"key": 1},
