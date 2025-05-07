@@ -79,6 +79,8 @@ type Logger struct {
 	rateLimits  map[Level]*rateLimit   // Rate limits per log level
 	sampleRates map[Level]float64      // Sampling rates per log level
 	middleware  []func(*Entry) bool    // Middleware functions to process entries
+	prefix      string                 // Prefix prepended to log messages
+	indent      int                    // Number of double spaces to indent messages
 }
 
 // namespaceStore manages namespace enable/disable states with a cache.
@@ -157,6 +159,30 @@ func (l *Logger) Namespace(name string) *Logger {
 		rateLimits:  l.rateLimits,
 		sampleRates: l.sampleRates,
 		middleware:  l.middleware,
+		prefix:      l.prefix,
+		indent:      l.indent,
+	}
+}
+
+// Clone creates a new logger with the same configuration and namespace as the parent.
+// It provides a fresh context map for independent field additions, avoiding namespace concatenation.
+func (l *Logger) Clone() *Logger {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	return &Logger{
+		enabled:     l.enabled,
+		level:       l.level,
+		namespaces:  l.namespaces,
+		currentPath: l.currentPath,
+		context:     make(map[string]interface{}),
+		style:       l.style,
+		handler:     l.handler,
+		rateLimits:  l.rateLimits,
+		sampleRates: l.sampleRates,
+		middleware:  l.middleware,
+		prefix:      l.prefix,
+		indent:      l.indent,
 	}
 }
 
@@ -177,6 +203,8 @@ func (l *Logger) WithContext(fields map[string]interface{}) *Logger {
 		rateLimits:  l.rateLimits,
 		sampleRates: l.sampleRates,
 		middleware:  l.middleware,
+		prefix:      l.prefix,
+		indent:      l.indent,
 	}
 
 	for k, v := range l.context {
@@ -187,6 +215,38 @@ func (l *Logger) WithContext(fields map[string]interface{}) *Logger {
 	}
 
 	return newLogger
+}
+
+// Enabled returns whether the logger is enabled for logging.
+// Thread-safe access to the enabled field.
+func (l *Logger) Enabled() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.enabled
+}
+
+// Level returns the minimum log level for the logger.
+// Thread-safe access to the level field.
+func (l *Logger) Level() Level {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.level
+}
+
+// Prefix sets a prefix to be prepended to all log messages of the current logger.
+// The prefix is applied before the message in the log output.
+func (l *Logger) Prefix(prefix string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.prefix = prefix
+}
+
+// Indent sets the indentation level for all log messages of the current logger.
+// Each level adds two spaces to the log message, useful for hierarchical output.
+func (l *Logger) Indent(depth int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.indent = depth
 }
 
 // SetHandler sets the handler for processing log entries.
@@ -326,10 +386,19 @@ func (l *Logger) log(level Level, msg string, fields map[string]interface{}, wit
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
+	// Apply prefix and indentation to the message
+	finalMsg := msg
+	if l.prefix != "" {
+		finalMsg = l.prefix + finalMsg
+	}
+	if l.indent > 0 {
+		finalMsg = strings.Repeat("  ", l.indent) + finalMsg
+	}
+
 	entry := &Entry{
 		Timestamp: time.Now(),
 		Level:     level,
-		Message:   msg,
+		Message:   finalMsg,
 		Namespace: l.currentPath,
 		Fields:    fields,
 		style:     l.style,
@@ -464,7 +533,16 @@ func (l *Logger) Stack(format string, args ...any) {
 	l.log(LevelError, msg, nil, true)
 }
 
-// FieldBuilder logging methods
+// Logger creates a new logger with the builder’s fields embedded in its context.
+// Allows fluent chaining after Fields or Field.
+func (fb *FieldBuilder) Logger() *Logger {
+	newLogger := fb.logger.Clone()
+	newLogger.context = make(map[string]interface{})
+	for k, v := range fb.fields {
+		newLogger.context[k] = v
+	}
+	return newLogger
+}
 
 // Info logs a message at Info level with the builder’s fields.
 func (fb *FieldBuilder) Info(format string, args ...any) {

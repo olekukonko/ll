@@ -519,6 +519,146 @@ func TestMiddleware(t *testing.T) {
 	}
 }
 
+// TestClone verifies the Clone method for creating a logger with the same namespace and isolated context.
+func TestClone(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
+	buf := &bytes.Buffer{}
+	logger := New("app")
+	logger.Enable()
+	logger.SetHandler(NewTextHandler(buf))
+	logger.SetLevel(LevelInfo)
+	logger.SetStyle(NestedPath)
+
+	// Test namespace preservation
+	t.Run("Namespace", func(t *testing.T) {
+		clone := logger.Clone()
+		if clone.currentPath != "app" {
+			t.Errorf("Expected clone namespace %q, got %q", "app", clone.currentPath)
+		}
+	})
+
+	// Test configuration inheritance
+	t.Run("Configuration", func(t *testing.T) {
+		clone := logger.Clone()
+		if !clone.Enabled() {
+			t.Errorf("Expected clone enabled=true, got %v", clone.Enabled())
+		}
+		if clone.Level() != LevelInfo {
+			t.Errorf("Expected clone level=%v, got %v", LevelInfo, clone.Level())
+		}
+		if clone.style != NestedPath {
+			t.Errorf("Expected clone style=%v, got %v", NestedPath, clone.style)
+		}
+	})
+
+	// Test context isolation
+	t.Run("ContextIsolation", func(t *testing.T) {
+		// Update parent logger with context
+		logger = logger.WithContext(map[string]interface{}{"parent": "value"})
+		clone := logger.Clone()
+		buf.Reset()
+		clone.Fields("clone", "value").Info("Clone message")
+		if !strings.Contains(buf.String(), "[app] : INFO: Clone message [clone=value]") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] : INFO: Clone message [clone=value]")
+		}
+		if strings.Contains(buf.String(), "parent=value") {
+			t.Errorf("Expected %q not to contain %q", buf.String(), "parent=value")
+		}
+	})
+
+	// Test parent context preservation
+	t.Run("ParentContext", func(t *testing.T) {
+		buf.Reset()
+		logger.Info("Parent message")
+		if strings.Contains(buf.String(), "clone=value") {
+			t.Errorf("Expected %q not to contain %q", buf.String(), "clone=value")
+		}
+		if !strings.Contains(buf.String(), "[app] : INFO: Parent message [parent=value]") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] : INFO: Parent message [parent=value]")
+		}
+	})
+}
+
+// TestPrefix verifies the Prefix method for prepending a string to log messages.
+func TestPrefix(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
+	buf := &bytes.Buffer{}
+	logger := New("app")
+	logger.Enable()
+	logger.SetHandler(NewTextHandler(buf))
+	logger.SetLevel(LevelInfo)
+
+	// Test setting a prefix
+	t.Run("SetPrefix", func(t *testing.T) {
+		logger.Prefix("INFO: ")
+		buf.Reset()
+		logger.Info("Test message")
+		if !strings.Contains(buf.String(), "[app] INFO: INFO: Test message") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: INFO: Test message")
+		}
+	})
+
+	// Test updating the prefix
+	t.Run("UpdatePrefix", func(t *testing.T) {
+		logger.Prefix("DEBUG: ")
+		buf.Reset()
+		logger.Info("Another message")
+		if !strings.Contains(buf.String(), "[app] INFO: DEBUG: Another message") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: DEBUG: Another message")
+		}
+	})
+
+	// Test removing the prefix
+	t.Run("RemovePrefix", func(t *testing.T) {
+		logger.Prefix("")
+		buf.Reset()
+		logger.Info("No prefix")
+		if !strings.Contains(buf.String(), "[app] INFO: No prefix") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: No prefix")
+		}
+	})
+}
+
+// TestIndent verifies the Indent method for adding double spaces to log messages.
+func TestIndent(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
+	buf := &bytes.Buffer{}
+	logger := New("app")
+	logger.Enable()
+	logger.SetHandler(NewTextHandler(buf))
+	logger.SetLevel(LevelInfo)
+
+	// Test setting indentation to 2 (4 spaces)
+	t.Run("SetIndent", func(t *testing.T) {
+		logger.Indent(2)
+		buf.Reset()
+		logger.Info("Test message")
+		if !strings.Contains(buf.String(), "[app] INFO:     Test message") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO:     Test message")
+		}
+	})
+
+	// Test updating indentation to 1 (2 spaces)
+	t.Run("UpdateIndent", func(t *testing.T) {
+		logger.Indent(1)
+		buf.Reset()
+		logger.Info("Another message")
+		if !strings.Contains(buf.String(), "[app] INFO:   Another message") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO:   Another message")
+		}
+	})
+
+	// Test removing indentation
+	t.Run("RemoveIndent", func(t *testing.T) {
+		logger.Indent(0)
+		buf.Reset()
+		logger.Info("No indent")
+		if !strings.Contains(buf.String(), "[app] INFO: No indent") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: No indent")
+		}
+	})
+}
+
 // failingWriter is a test writer that always fails to write, used to simulate handler errors.
 type failingWriter struct{}
 
