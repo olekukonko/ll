@@ -1,12 +1,10 @@
 package ll
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/fatih/color"
 	"io"
 	"log/slog"
 	"sort"
@@ -14,211 +12,224 @@ import (
 	"time"
 )
 
-// MultiHandler combines multiple handlers
+// MultiHandler combines multiple handlers to process log entries concurrently.
 type MultiHandler struct {
-	Handlers []Handler
+	Handlers []Handler // List of handlers to process each log entry
 }
 
-// NewMultiHandler creates a new MultiHandler with the given handlers
+// NewMultiHandler creates a new MultiHandler with the specified handlers.
+// It accepts a variadic list of handlers to be executed in order.
 func NewMultiHandler(h ...Handler) *MultiHandler {
 	return &MultiHandler{
 		Handlers: h,
 	}
 }
 
-// Handle implements Handler, calling Handle on each handler and collecting errors
+// Handle implements the Handler interface, calling Handle on each handler in sequence.
+// It collects any errors from handlers and combines them into a single error using errors.Join.
 func (h *MultiHandler) Handle(e *Entry) error {
 	var errs []error
 	for i, handler := range h.Handlers {
-		// fmt.Printf("MultiHandler: calling handler %d\n", i)
+		// Execute each handler and capture any error with its index
 		if err := handler.Handle(e); err != nil {
 			errs = append(errs, fmt.Errorf("handler %d: %w", i, err))
 		}
 	}
+	// Return a combined error if any handlers failed, or nil if all succeeded
 	return errors.Join(errs...)
 }
 
-// TextHandler is a simple text-based handler
+// TextHandler is a simple handler that outputs logs in plain text format.
 type TextHandler struct {
-	writer io.Writer
+	writer io.Writer // Destination for log output
 }
 
+// NewTextHandler creates a new TextHandler that writes to the specified writer.
 func NewTextHandler(w io.Writer) *TextHandler {
 	return &TextHandler{writer: w}
 }
 
+// Handle implements the Handler interface, formatting the log entry as plain text.
+// It includes the namespace, level, message, and fields, using the specified style (FlatPath or NestedPath).
 func (h *TextHandler) Handle(e *Entry) error {
-	var buf bytes.Buffer
-
+	var sb strings.Builder
+	// Format namespace if present
 	if e.Namespace != "" {
-		switch e.style {
-		case NestedPath:
+		if e.style == NestedPath {
+			// Split namespace into parts and format as [parent] -> [child]
 			parts := strings.Split(e.Namespace, "/")
 			for i, p := range parts {
 				if i > 0 {
-					buf.WriteString(" -> ")
+					sb.WriteString(" -> ")
 				}
-				buf.WriteString(fmt.Sprintf("[%s]", p))
+				sb.WriteString(fmt.Sprintf("[%s]", p))
 			}
-			buf.WriteString(" : ")
-		default:
-			buf.WriteString(fmt.Sprintf("[%s] ", e.Namespace))
+			sb.WriteString(" : ")
+		} else {
+			// Format as [parent/child]
+			sb.WriteString(fmt.Sprintf("[%s] ", e.Namespace))
 		}
 	}
-
-	buf.WriteString(fmt.Sprintf("%s: %s", e.Level.String(), e.Message))
-
+	// Add level and message
+	sb.WriteString(fmt.Sprintf("%s: %s", e.Level.String(), e.Message))
+	// Add sorted fields if present
 	if len(e.Fields) > 0 {
 		keys := make([]string, 0, len(e.Fields))
 		for k := range e.Fields {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
-		buf.WriteString(" [")
+		sb.WriteString(" [")
 		for i, k := range keys {
 			if i > 0 {
-				buf.WriteString(" ")
+				sb.WriteString(" ")
 			}
-			buf.WriteString(fmt.Sprintf("%s=%v", k, e.Fields[k]))
+			sb.WriteString(fmt.Sprintf("%s=%v", k, e.Fields[k]))
 		}
-		buf.WriteString("]")
+		sb.WriteString("]")
 	}
-	buf.WriteString("\n")
-
-	// fmt.Printf("TextHandler: writing %s to %v\n", buf.String(), h.writer)
-	_, err := h.writer.Write(buf.Bytes())
+	sb.WriteString("\n")
+	// Write the formatted string to the writer
+	_, err := h.writer.Write([]byte(sb.String()))
 	return err
 }
 
-// JSONHandler outputs logs in JSON format
-type JSONHandler struct {
-	writer io.Writer
-}
-
-func NewJSONHandler(w io.Writer) *JSONHandler {
-	return &JSONHandler{writer: w}
-}
-
-func (h *JSONHandler) Handle(e *Entry) error {
-	entry := map[string]interface{}{
-		"timestamp": e.Timestamp.Format(time.RFC3339Nano),
-		"level":     e.Level.String(),
-		"message":   e.Message,
-		"namespace": e.Namespace,
-	}
-	for k, v := range e.Fields {
-		entry[k] = v
-	}
-
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = h.writer.Write(data)
-	return err
-}
-
-// ColorizedHandler outputs logs with colors using fatih/color
+// ColorizedHandler outputs logs with ANSI color codes for enhanced terminal readability.
 type ColorizedHandler struct {
-	writer io.Writer
+	writer io.Writer // Destination for log output
 }
 
+// NewColorizedHandler creates a new ColorizedHandler that writes to the specified writer.
 func NewColorizedHandler(w io.Writer) *ColorizedHandler {
 	return &ColorizedHandler{writer: w}
 }
 
+// Handle implements the Handler interface, formatting the log entry with ANSI colors.
+// Namespaces are gray, levels are color-coded (e.g., Debug=cyan, Error=red), and fields have blue keys.
 func (h *ColorizedHandler) Handle(e *Entry) error {
-	var buf bytes.Buffer
-
-	// Define colors using fatih/color
-	namespaceColor := color.New(color.FgHiBlack) // Gray
-	debugColor := color.New(color.FgCyan)
-	infoColor := color.New(color.FgGreen)
-	warnColor := color.New(color.FgYellow)
-	errorColor := color.New(color.FgRed)
-	keyColor := color.New(color.FgBlue)
-
-	// Namespace
+	var sb strings.Builder
+	// Format namespace in gray if present
 	if e.Namespace != "" {
-		switch e.style {
-		case NestedPath:
+		if e.style == NestedPath {
+			// Split namespace into parts and format as [parent] -> [child]
 			parts := strings.Split(e.Namespace, "/")
 			for i, p := range parts {
 				if i > 0 {
-					buf.WriteString(" -> ")
+					sb.WriteString(" -> ")
 				}
-				buf.WriteString(namespaceColor.Sprintf("[%s]", p))
+				sb.WriteString(fmt.Sprintf("\033[90m[%s]\033[0m", p))
 			}
-			buf.WriteString(" : ")
-		default:
-			buf.WriteString(namespaceColor.Sprintf("[%s] ", e.Namespace))
+			sb.WriteString(" : ")
+		} else {
+			// Format as [parent/child]
+			sb.WriteString(fmt.Sprintf("\033[90m[%s]\033[0m ", e.Namespace))
 		}
 	}
-
-	// Level and message
-	var levelColor *color.Color
+	// Format level with appropriate color
+	var levelStr string
 	switch e.Level {
 	case LevelDebug:
-		levelColor = debugColor
+		levelStr = "\033[36mDEBUG\033[0m" // Cyan
 	case LevelInfo:
-		levelColor = infoColor
+		levelStr = "\033[32mINFO\033[0m" // Green
 	case LevelWarn:
-		levelColor = warnColor
+		levelStr = "\033[33mWARN\033[0m" // Yellow
 	case LevelError:
-		levelColor = errorColor
+		levelStr = "\033[31mERROR\033[0m" // Red
 	default:
-		levelColor = color.New(color.FgWhite)
+		levelStr = e.Level.String()
 	}
-	buf.WriteString(levelColor.Sprintf("%s", e.Level.String()))
-	buf.WriteString(": ")
-	buf.WriteString(e.Message)
-
+	sb.WriteString(fmt.Sprintf("%s: %s", levelStr, e.Message))
+	// Add sorted fields with blue keys if present
 	if len(e.Fields) > 0 {
 		keys := make([]string, 0, len(e.Fields))
 		for k := range e.Fields {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
-		buf.WriteString(" [")
+		sb.WriteString(" [")
 		for i, k := range keys {
 			if i > 0 {
-				buf.WriteString(" ")
+				sb.WriteString(" ")
 			}
-			buf.WriteString(keyColor.Sprintf("%s", k))
-			buf.WriteString(fmt.Sprintf("=%v", e.Fields[k]))
+			sb.WriteString(fmt.Sprintf("\033[34m%s\033[0m=%v", k, e.Fields[k]))
 		}
-		buf.WriteString("]")
+		sb.WriteString("]")
 	}
-	buf.WriteString("\n")
-
-	_, err := h.writer.Write(buf.Bytes())
+	sb.WriteString("\n")
+	// Write the formatted string to the writer
+	_, err := h.writer.Write([]byte(sb.String()))
 	return err
 }
 
-// SlogHandler adapts slog for compatibility
-type SlogHandler struct {
-	slogHandler slog.Handler
+// JSONHandler outputs logs in JSON format for structured logging.
+type JSONHandler struct {
+	writer  io.Writer // Destination for log output
+	timeFmt string    // Timestamp format (e.g., RFC3339Nano)
 }
 
+// NewJSONHandler creates a new JSONHandler with the specified writer and optional timestamp format.
+// If timeFmt is empty, it defaults to time.RFC3339Nano.
+func NewJSONHandler(w io.Writer, timeFmt string) *JSONHandler {
+	if timeFmt == "" {
+		timeFmt = time.RFC3339Nano
+	}
+	return &JSONHandler{writer: w, timeFmt: timeFmt}
+}
+
+// Handle implements the Handler interface, serializing the log entry to JSON.
+// It includes timestamp, level, message, namespace, and fields in the output.
+func (h *JSONHandler) Handle(e *Entry) error {
+	// Create a map with standard log fields
+	entry := map[string]interface{}{
+		"timestamp": e.Timestamp.Format(h.timeFmt),
+		"level":     e.Level.String(),
+		"message":   e.Message,
+		"namespace": e.Namespace,
+	}
+	// Add custom fields
+	for k, v := range e.Fields {
+		entry[k] = v
+	}
+	// Marshal to JSON
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	// Append newline for readability
+	data = append(data, '\n')
+	// Write the JSON data to the writer
+	_, err = h.writer.Write(data)
+	return err
+}
+
+// SlogHandler adapts the standard library’s slog.Handler for compatibility with this package.
+type SlogHandler struct {
+	slogHandler slog.Handler // Underlying slog handler
+}
+
+// NewSlogHandler creates a new SlogHandler wrapping the provided slog.Handler.
 func NewSlogHandler(h slog.Handler) *SlogHandler {
 	return &SlogHandler{slogHandler: h}
 }
 
+// Handle implements the Handler interface, converting the log entry to an slog.Record.
+// It maps entry fields to slog attributes and delegates to the underlying slog.Handler.
 func (h *SlogHandler) Handle(e *Entry) error {
+	// Create attributes for standard fields
 	attrs := make([]slog.Attr, 0, len(e.Fields)+3)
 	attrs = append(attrs,
 		slog.String("timestamp", e.Timestamp.Format(time.RFC3339Nano)),
 		slog.String("level", e.Level.String()),
 		slog.String("namespace", e.Namespace),
 	)
+	// Add custom fields as attributes
 	for k, v := range e.Fields {
 		attrs = append(attrs, slog.Any(k, v))
 	}
-
+	// Create an slog.Record with the entry’s timestamp, level, and message
 	record := slog.NewRecord(e.Timestamp, slog.Level(e.Level), e.Message, 0)
 	record.AddAttrs(attrs...)
+	// Delegate to the underlying slog.Handler
 	return h.slogHandler.Handle(context.Background(), record)
 }

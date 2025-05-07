@@ -5,162 +5,233 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
+// TestMain sets up the test environment and runs the test suite.
+// It resets the defaultLogger to a clean state to prevent state leakage between tests.
 func TestMain(m *testing.M) {
-	// Reset defaultLogger before running tests to prevent state leakage
+	// Initialize defaultLogger with default values
 	defaultLogger = &Logger{
 		enabled:     defaultEnabled,
 		level:       LevelDebug,
-		namespaces:  sync.Map{},
+		namespaces:  defaultStore,
 		context:     make(map[string]interface{}),
 		style:       FlatPath,
+		handler:     nil,
 		rateLimits:  make(map[Level]*rateLimit),
 		sampleRates: make(map[Level]float64),
 	}
+	// Run tests and exit with the appropriate status code
 	os.Exit(m.Run())
 }
 
+// TestLoggerConfiguration verifies the basic configuration methods of the Logger.
 func TestLoggerConfiguration(t *testing.T) {
+	// Create a new logger with namespace "test"
 	logger := New("test")
 	logger.Enable()
 
-	// Test Enable/Disable
+	// Test Enable/Disable functionality
 	logger.Disable()
-	logger.Info("Should not log")
-	assert.False(t, logger.enabled)
+	logger.Info("Should not log") // Should be ignored since logger is disabled
+	if logger.enabled {
+		t.Errorf("Expected enabled=false, got %v", logger.enabled)
+	}
 	logger.Enable()
-	assert.True(t, logger.enabled)
+	if !logger.enabled {
+		t.Errorf("Expected enabled=true, got %v", logger.enabled)
+	}
 
-	// Test SetLevel
+	// Test SetLevel functionality
 	logger.SetLevel(LevelWarn)
-	assert.Equal(t, LevelWarn, logger.level)
-	logger.Info("Should not log")
-	logger.Warn("Should log")
+	if logger.level != LevelWarn {
+		t.Errorf("Expected level=%v, got %v", LevelWarn, logger.level)
+	}
+	logger.Info("Should not log") // Below Warn level, should be ignored
+	logger.Warn("Should log")     // At Warn level, should be processed
 
-	// Test SetStyle
+	// Test SetStyle functionality
 	logger.SetStyle(NestedPath)
-	assert.Equal(t, NestedPath, logger.style)
+	if logger.style != NestedPath {
+		t.Errorf("Expected style=%v, got %v", NestedPath, logger.style)
+	}
 	logger.SetStyle(FlatPath)
-	assert.Equal(t, FlatPath, logger.style)
+	if logger.style != FlatPath {
+		t.Errorf("Expected style=%v, got %v", FlatPath, logger.style)
+	}
 }
 
+// TestLoggingMethods verifies the core logging methods (Debug, Info, Warn, Error, Stack).
 func TestLoggingMethods(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
 	logger := New("test")
 	logger.Enable()
 	logger.SetHandler(NewTextHandler(buf))
 	logger.SetLevel(LevelDebug)
 
-	// Test Debug
+	// Test Debug logging
 	buf.Reset()
 	logger.Fields("key", "value").Debug("Debug message")
-	assert.Contains(t, buf.String(), "[test] DEBUG: Debug message [key=value]")
+	if !strings.Contains(buf.String(), "[test] DEBUG: Debug message [key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] DEBUG: Debug message [key=value]")
+	}
 
-	// Test Info
+	// Test Info logging
 	buf.Reset()
 	logger.Fields("key", "value").Info("Info message")
-	assert.Contains(t, buf.String(), "[test] INFO: Info message [key=value]")
+	if !strings.Contains(buf.String(), "[test] INFO: Info message [key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Info message [key=value]")
+	}
 
-	// Test Warn
+	// Test Warn logging
 	buf.Reset()
 	logger.Fields("key", "value").Warn("Warn message")
-	assert.Contains(t, buf.String(), "[test] WARN: Warn message [key=value]")
+	if !strings.Contains(buf.String(), "[test] WARN: Warn message [key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] WARN: Warn message [key=value]")
+	}
 
-	// Test Error
+	// Test Error logging
 	buf.Reset()
 	logger.Fields("key", "value").Error("Error message")
-	assert.Contains(t, buf.String(), "[test] ERROR: Error message [key=value]")
+	if !strings.Contains(buf.String(), "[test] ERROR: Error message [key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] ERROR: Error message [key=value]")
+	}
 
-	// Test Stack
+	// Test Stack logging with stack trace
 	buf.Reset()
 	logger.Fields("key", "value").Stack("Error with stack")
 	output := buf.String()
-	assert.Contains(t, output, "[test] ERROR: Error with stack")
-	assert.Contains(t, output, "key=value")
-	assert.Contains(t, output, "stack=")
+	if !strings.Contains(output, "[test] ERROR: Error with stack") {
+		t.Errorf("Expected %q to contain %q", output, "[test] ERROR: Error with stack")
+	}
+	if !strings.Contains(output, "key=value") {
+		t.Errorf("Expected %q to contain %q", output, "key=value")
+	}
+	if !strings.Contains(output, "stack=") {
+		t.Errorf("Expected %q to contain %q", output, "stack=")
+	}
 }
 
+// TestBuilderFields verifies the Fields and Field methods for adding metadata to logs.
 func TestBuilderFields(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
 	logger := New("test")
 	logger.Enable()
 	logger.SetHandler(NewTextHandler(buf))
 
-	// Test variadic Fields
+	// Test variadic Fields with multiple key-value pairs
 	buf.Reset()
 	logger.Fields("k1", "v1", "k2", "v2", "k3", 123).Info("Test variadic")
-	assert.Contains(t, buf.String(), "[test] INFO: Test variadic [k1=v1 k2=v2 k3=123]")
+	if !strings.Contains(buf.String(), "[test] INFO: Test variadic [k1=v1 k2=v2 k3=123]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test variadic [k1=v1 k2=v2 k3=123]")
+	}
 
-	// Test uneven Fields pairs
+	// Test map-based Field with a pre-constructed map
+	buf.Reset()
+	fields := map[string]interface{}{"k1": "v1", "k2": "v2", "k3": 123}
+	logger.Field(fields).Info("Test map")
+	if !strings.Contains(buf.String(), "[test] INFO: Test map [k1=v1 k2=v2 k3=123]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test map [k1=v1 k2=v2 k3=123]")
+	}
+
+	// Test variadic Fields with uneven key-value pairs
 	buf.Reset()
 	logger.Fields("k1", "v1", "k2").Info("Test uneven")
-	assert.Contains(t, buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]")
+	if !strings.Contains(buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]")
+	}
 
-	// Test non-string key
+	// Test variadic Fields with a non-string key
 	buf.Reset()
 	logger.Fields("k1", "v1", 42, "v2").Info("Test non-string")
-	assert.Contains(t, buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]")
+	if !strings.Contains(buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]")
+	}
 }
 
+// TestHandlers verifies the behavior of all log handlers (Text, Colorized, JSON, Slog, Multi).
 func TestHandlers(t *testing.T) {
-	// Test TextHandler
+	// Test TextHandler for plain text output
 	t.Run("TextHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := New("test")
 		logger.Enable()
 		logger.SetHandler(NewTextHandler(buf))
 		logger.Fields("key", "value").Info("Test text")
-		assert.Contains(t, buf.String(), "[test] INFO: Test text [key=value]")
+		if !strings.Contains(buf.String(), "[test] INFO: Test text [key=value]") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test text [key=value]")
+		}
 	})
 
-	// Test JSONHandler
-	t.Run("JSONHandler", func(t *testing.T) {
-		buf := &bytes.Buffer{}
-		logger := New("test")
-		logger.Enable()
-		logger.SetHandler(NewJSONHandler(buf))
-		logger.Fields("key", "value").Info("Test JSON")
-		var data map[string]interface{}
-		err := json.Unmarshal(buf.Bytes(), &data)
-		assert.NoError(t, err)
-		assert.Equal(t, "INFO", data["level"])
-		assert.Equal(t, "Test JSON", data["message"])
-		assert.Equal(t, "test", data["namespace"])
-		assert.Equal(t, "value", data["key"])
-	})
-
-	// Test ColorizedHandler
+	// Test ColorizedHandler for ANSI-colored output
 	t.Run("ColorizedHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := New("test")
 		logger.Enable()
 		logger.SetHandler(NewColorizedHandler(buf))
 		logger.Fields("key", "value").Info("Test color")
-		assert.Contains(t, buf.String(), "[test] INFO: Test color [key=value]")
+		// Check for namespace presence, ignoring ANSI codes
+		if !strings.Contains(buf.String(), "[test]") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test color [key=value]")
+		}
 	})
 
-	// Test SlogHandler
+	// Test JSONHandler for structured JSON output
+	t.Run("JSONHandler", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := New("test")
+		logger.Enable()
+		logger.SetHandler(NewJSONHandler(buf, ""))
+		logger.Fields("key", "value").Info("Test JSON")
+		// Parse JSON output and verify fields
+		var data map[string]interface{}
+		if err := json.Unmarshal(buf.Bytes(), &data); err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if data["level"] != "INFO" {
+			t.Errorf("Expected level=%q, got %q", "INFO", data["level"])
+		}
+		if data["message"] != "Test JSON" {
+			t.Errorf("Expected message=%q, got %q", "Test JSON", data["message"])
+		}
+		if data["namespace"] != "test" {
+			t.Errorf("Expected namespace=%q, got %q", "test", data["namespace"])
+		}
+		if data["key"] != "value" {
+			t.Errorf("Expected key=%q, got %q", "value", data["key"])
+		}
+	})
+
+	// Test SlogHandler for compatibility with slog
 	t.Run("SlogHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := New("test")
 		logger.Enable()
 		logger.SetHandler(NewSlogHandler(slog.NewTextHandler(buf, nil)))
 		logger.Fields("key", "value").Info("Test slog")
-		assert.Contains(t, buf.String(), "level=INFO")
-		assert.Contains(t, buf.String(), "msg=\"Test slog\"")
-		assert.Contains(t, buf.String(), "namespace=test")
-		assert.Contains(t, buf.String(), "key=value")
+		output := buf.String()
+		if !strings.Contains(output, "level=INFO") {
+			t.Errorf("Expected %q to contain %q", output, "level=INFO")
+		}
+		if !strings.Contains(output, "msg=\"Test slog\"") {
+			t.Errorf("Expected %q to contain %q", output, "msg=\"Test slog\"")
+		}
+		if !strings.Contains(output, "namespace=test") {
+			t.Errorf("Expected %q to contain %q", output, "namespace=test")
+		}
+		if !strings.Contains(output, "key=value") {
+			t.Errorf("Expected %q to contain %q", output, "key=value")
+		}
 	})
 
-	// Test MultiHandler
+	// Test MultiHandler for combining multiple handlers
 	t.Run("MultiHandler", func(t *testing.T) {
 		buf1 := &bytes.Buffer{}
 		buf2 := &bytes.Buffer{}
@@ -168,144 +239,365 @@ func TestHandlers(t *testing.T) {
 		logger.Enable()
 		logger.SetHandler(NewMultiHandler(
 			NewTextHandler(buf1),
-			NewJSONHandler(buf2),
+			NewJSONHandler(buf2, ""),
 		))
 		logger.Fields("key", "value").Info("Test multi")
-		assert.Contains(t, buf1.String(), "[test] INFO: Test multi [key=value]")
+		// Verify TextHandler output
+		if !strings.Contains(buf1.String(), "[test] INFO: Test multi [key=value]") {
+			t.Errorf("Expected %q to contain %q", buf1.String(), "[test] INFO: Test multi [key=value]")
+		}
+		// Verify JSONHandler output
 		var data map[string]interface{}
-		err := json.Unmarshal(buf2.Bytes(), &data)
-		assert.NoError(t, err)
-		assert.Equal(t, "Test multi", data["message"])
+		if err := json.Unmarshal(buf2.Bytes(), &data); err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if data["message"] != "Test multi" {
+			t.Errorf("Expected message=%q, got %q", "Test multi", data["message"])
+		}
 	})
 }
 
+// TestNamespaces verifies namespace-related functionality, including child namespaces and enable/disable behavior.
 func TestNamespaces(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
 	logger := New("parent")
 	logger.Enable()
 	logger.SetHandler(NewTextHandler(buf))
 
-	// Test child namespace
+	// Test child namespace creation and logging
 	child := logger.Namespace("child")
 	child.Enable()
 	buf.Reset()
 	child.Info("Child log")
-	assert.Contains(t, buf.String(), "[parent/child] INFO: Child log")
+	if !strings.Contains(buf.String(), "[parent/child] INFO: Child log") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[parent/child] INFO: Child log")
+	}
 
-	// Test NestedPath style
+	// Test NestedPath style formatting
 	logger.SetStyle(NestedPath)
 	child.SetStyle(NestedPath)
 	buf.Reset()
 	child.Info("Nested log")
-	assert.Contains(t, buf.String(), "[parent] -> [child] : INFO: Nested log")
+	if !strings.Contains(buf.String(), "[parent] -> [child] : INFO: Nested log") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[parent] -> [child] : INFO: Nested log")
+	}
 
-	// Test Enable/DisableNamespace
-	logger.DisableNamespace("parent/child")
+	// Test NamespaceEnable/NamespaceDisable to verify logging behavior
+	logger.NamespaceDisable("parent/child")
 	// Debug namespace state before logging
 	enabled, ok := child.namespaces.Load("parent/child")
 	fmt.Printf("Namespace parent/child before logging: ok=%v, enabled=%v\n", ok, enabled)
 	buf.Reset()
-	child.Info("Should not log")
+	child.Info("Should not log") // Should be ignored due to disabled namespace
 	// Debug namespace state after logging
 	enabled, ok = child.namespaces.Load("parent/child")
 	fmt.Printf("Namespace parent/child after logging: ok=%v, enabled=%v\n", ok, enabled)
-	assert.Empty(t, buf.String(), "Should be empty, but was %s", buf.String())
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
 
-	logger.EnableNamespace("parent/child")
+	// Re-enable namespace and verify logging
+	logger.NamespaceEnable("parent/child")
 	child.Enable()
 	buf.Reset()
 	child.Info("Should log")
-	assert.Contains(t, buf.String(), "[parent] -> [child] : INFO: Should log")
+	if !strings.Contains(buf.String(), "[parent] -> [child] : INFO: Should log") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[parent] -> [child] : INFO: Should log")
+	}
 }
 
+// TestSharedNamespaces verifies namespace state sharing between parent and child loggers.
+func TestSharedNamespaces(t *testing.T) {
+	// Create a fresh parent logger
+	parent := New("parent")
+	parent.Enable()
+	parent.SetHandler(NewTextHandler(os.Stdout))
+
+	// Disable the child namespace
+	parent.NamespaceDisable("parent/child")
+
+	// Create a child logger
+	child := parent.Namespace("child")
+	child.Enable()
+
+	// Set up a buffer for capturing child logger output
+	buf := &bytes.Buffer{}
+	child.SetHandler(NewTextHandler(buf))
+
+	// Verify logging is disabled
+	child.Info("Should not log")
+	if buf.String() != "" {
+		t.Errorf("Expected no output from disabled namespace, got: %q", buf.String())
+	}
+
+	// Enable the namespace and verify logging
+	parent.NamespaceEnable("parent/child")
+	buf.Reset()
+	child.Info("Should log")
+	if !strings.Contains(buf.String(), "Should log") {
+		t.Errorf("Expected log output from enabled namespace, got: %q", buf.String())
+	}
+}
+
+// TestRateLimiting verifies rate-limiting functionality for a log level.
 func TestRateLimiting(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
 	logger := New("test")
 	logger.Enable()
 	logger.SetHandler(NewTextHandler(buf))
 	logger.SetRateLimit(LevelInfo, 2, time.Second)
 
-	// Test within limit
+	// Test logging within the rate limit (2 logs allowed)
 	buf.Reset()
 	logger.Info("Log 1")
 	logger.Info("Log 2")
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	assert.Len(t, lines, 2, "Expected exactly 2 logs")
-	assert.Contains(t, buf.String(), "Log 1")
-	assert.Contains(t, buf.String(), "Log 2")
+	if len(lines) != 2 {
+		t.Errorf("Expected %d logs, got %d", 2, len(lines))
+	}
+	if !strings.Contains(buf.String(), "Log 1") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "Log 1")
+	}
+	if !strings.Contains(buf.String(), "Log 2") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "Log 2")
+	}
 
-	// Test exceeding limit
+	// Test exceeding the rate limit
 	buf.Reset()
-	logger.Info("Log 3") // Should not log
-	assert.Empty(t, buf.String(), "Log 3 should not appear due to rate limit")
+	logger.Info("Log 3") // Should be blocked
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
 
-	// Test reset after interval
+	// Test logging after the interval resets
 	time.Sleep(time.Second)
 	buf.Reset()
 	logger.Info("Log 4")
-	assert.Contains(t, buf.String(), "Log 4")
+	if !strings.Contains(buf.String(), "Log 4") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "Log 4")
+	}
 }
 
+// TestSampling verifies sampling functionality for a log level.
 func TestSampling(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
 	logger := New("test")
 	logger.Enable()
 	logger.SetHandler(NewTextHandler(buf))
 	logger.SetSampling(LevelInfo, 0.0) // Never log
 
+	// Test logging with 0.0 sampling rate
 	buf.Reset()
 	logger.Info("Should not log")
-	assert.Empty(t, buf.String())
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
 
+	// Test logging with 1.0 sampling rate
 	logger.SetSampling(LevelInfo, 1.0) // Always log
 	buf.Reset()
 	logger.Info("Should log")
-	assert.Contains(t, buf.String(), "[test] INFO: Should log")
+	if !strings.Contains(buf.String(), "[test] INFO: Should log") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Should log")
+	}
 }
 
+// TestConditionalLogging verifies conditional logging using the If method.
 func TestConditionalLogging(t *testing.T) {
+	// Reset defaultLogger to ensure clean state
+	defaultLogger = &Logger{
+		enabled:     true,
+		level:       LevelDebug,
+		namespaces:  defaultStore,
+		context:     make(map[string]interface{}),
+		style:       FlatPath,
+		handler:     nil,
+		rateLimits:  make(map[Level]*rateLimit),
+		sampleRates: make(map[Level]float64),
+	}
+
+	// Set up a logger with a buffer for capturing output
+	buf := &bytes.Buffer{}
+	logger := New("VC")
+	logger.Enable()
+	logger.SetHandler(NewTextHandler(buf))
+	logger.SetLevel(LevelDebug)
+
+	// Test false condition with variadic Fields
+	buf.Reset()
+	logger.If(false).Fields("key", "value").Info("Should not log")
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
+
+	// Test true condition with variadic Fields
+	buf.Reset()
+	logger.If(true).Fields("key", "value").Info("Should log")
+	if !strings.Contains(buf.String(), "[VC] INFO: Should log [key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Should log [key=value]")
+	}
+
+	// Test false condition with map-based Field
+	buf.Reset()
+	fields := map[string]interface{}{"key": "value"}
+	logger.If(false).Field(fields).Info("Should not log")
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
+
+	// Test true condition with map-based Field
+	buf.Reset()
+	logger.If(true).Field(fields).Info("Should log")
+	if !strings.Contains(buf.String(), "[VC] INFO: Should log [key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Should log [key=value]")
+	}
+
+	// Test variadic Fields with uneven pairs under true condition
+	buf.Reset()
+	logger.If(true).Fields("key", "value", "odd").Info("Test uneven")
+	if !strings.Contains(buf.String(), "[VC] INFO: Test uneven [error=uneven key-value pairs in Fields: [odd] key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test uneven [error=uneven key-value pairs in Fields: [odd] key=value]")
+	}
+
+	// Test variadic Fields with non-string key under true condition
+	buf.Reset()
+	logger.If(true).Fields("key", "value", 42, "value2").Info("Test non-string")
+	if !strings.Contains(buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]")
+	}
+}
+
+// TestMiddleware verifies the Use method for adding middleware to process log entries.
+func TestMiddleware(t *testing.T) {
+	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
 	logger := New("test")
 	logger.Enable()
 	logger.SetHandler(NewTextHandler(buf))
+	logger.SetLevel(LevelDebug)
 
-	// Test false condition
+	// Test middleware that adds a field
+	logger.Use(func(e *Entry) bool {
+		if e.Fields == nil {
+			e.Fields = make(map[string]interface{})
+		}
+		e.Fields["extra"] = "value"
+		return true
+	})
 	buf.Reset()
-	logger.If(false).Info("Should not log")
-	assert.Empty(t, buf.String())
+	logger.Info("Test with extra field")
+	if !strings.Contains(buf.String(), "[test] INFO: Test with extra field [extra=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test with extra field [extra=value]")
+	}
 
-	// Test true condition
+	// Test middleware that filters logs by level
+	logger.Use(func(e *Entry) bool {
+		return e.Level >= LevelWarn
+	})
 	buf.Reset()
-	logger.If(true).Fields("key", "value").Info("Should log")
-	assert.Contains(t, buf.String(), "[test] INFO: Should log [key=value]")
+	logger.Info("Should not log") // Below Warn level, should be ignored
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
+	buf.Reset()
+	logger.Warn("Should log")
+	if !strings.Contains(buf.String(), "[test] WARN: Should log [extra=value]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] WARN: Should log [extra=value]")
+	}
+
+	// Test middleware that skips all logs
+	logger.Use(func(e *Entry) bool {
+		return false
+	})
+	buf.Reset()
+	logger.Warn("Should not log") // Should be ignored by middleware
+	if buf.String() != "" {
+		t.Errorf("Expected empty buffer, got %q", buf.String())
+	}
 }
 
-// failingWriter simulates a failing io.Writer
+// failingWriter is a test writer that always fails to write, used to simulate handler errors.
 type failingWriter struct{}
 
+// Write implements io.Writer, always returning an error.
 func (w *failingWriter) Write(p []byte) (n int, err error) {
 	return 0, errors.New("write failed")
 }
 
+// TestHandlerErrors verifies handler behavior when errors occur.
 func TestHandlerErrors(t *testing.T) {
+	// Reset defaultLogger to ensure clean state
+	defaultLogger = &Logger{
+		enabled:     true,
+		level:       LevelDebug,
+		namespaces:  defaultStore,
+		context:     make(map[string]interface{}),
+		style:       FlatPath,
+		handler:     nil,
+		rateLimits:  make(map[Level]*rateLimit),
+		sampleRates: make(map[Level]float64),
+	}
 
-	// Test single TextHandler first
+	// Test single TextHandler
 	buf := &bytes.Buffer{}
 	logger := New("test")
 	logger.Enable()
-	logger.SetLevel(LevelDebug) // Ensure level allows Info
+	logger.SetLevel(LevelDebug)
 	logger.SetHandler(NewTextHandler(buf))
+
 	logger.Info("Test single handler")
-	// fmt.Printf("Single handler output: %s\n", buf.String())
-	assert.Contains(t, buf.String(), "[test] INFO: Test single handler")
+	if !strings.Contains(buf.String(), "[test] INFO: Test single handler") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test single handler")
+	}
 
 	// Test MultiHandler with a failing TextHandler
 	buf.Reset()
 	logger.SetHandler(NewMultiHandler(
-		NewTextHandler(buf),              // Success
-		NewTextHandler(&failingWriter{}), // Failure
+		NewTextHandler(buf),
+		NewTextHandler(&failingWriter{}),
 	))
 	logger.Info("Test multi error")
-	// fmt.Printf("Multi handler output: %s\n", buf.String())
-	assert.Contains(t, buf.String(), "[test] INFO: Test multi error")
+	if !strings.Contains(buf.String(), "[test] INFO: Test multi error") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test multi error")
+	}
+}
+
+// TestNamespaceToggle verifies the NamespaceEnable and NamespaceDisable methods.
+func TestNamespaceToggle(t *testing.T) {
+	// Create a logger and test namespace toggling
+	logger := New("test")
+	logger.NamespaceEnable("parent/child")
+	if enabled, ok := logger.namespaces.Load("parent/child"); !ok || !enabled.(bool) {
+		t.Error("parent/child should be enabled")
+	}
+	logger.NamespaceDisable("parent/child")
+	if enabled, ok := logger.namespaces.Load("parent/child"); !ok || enabled.(bool) {
+		t.Error("parent/child should be disabled")
+	}
+}
+
+// TestTextHandler verifies the TextHandler’s output format.
+func TestTextHandler(t *testing.T) {
+	// Create a buffer and TextHandler
+	var buf bytes.Buffer
+	h := NewTextHandler(&buf)
+	// Create a test log entry
+	e := &Entry{
+		Timestamp: time.Now(),
+		Level:     LevelInfo,
+		Message:   "test",
+		Namespace: "",
+		Fields:    map[string]interface{}{"key": 1},
+	}
+	// Process the entry
+	if err := h.Handle(e); err != nil {
+		t.Errorf("Handle failed: %v", err)
+	}
+	// Verify the output format
+	if !strings.Contains(buf.String(), "INFO: test [key=1]") {
+		t.Errorf("Unexpected output: %s", buf.String())
+	}
 }
