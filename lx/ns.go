@@ -1,3 +1,4 @@
+// lx/ns.go
 package lx
 
 import (
@@ -5,81 +6,98 @@ import (
 	"sync"
 )
 
-// Namespace manages namespace enable/disable states with a cache.
-// It provides thread-safe storage and retrieval of namespace states (enabled or disabled)
-// for the ll package’s logging system. The struct uses two sync.Maps: one for persistent
-// state (store) and one for cached computed states (cache), optimizing performance by
-// reducing repeated hierarchy checks. Namespaces are hierarchical paths (e.g., "parent/child").
-// Example usage in ll package:
-//
-//	logger := ll.New("parent").Enable()
-//	logger.NamespaceDisable("parent/child") // Calls Namespace.Set
-//	if !logger.NamespaceEnabled("parent/child") { // Calls Namespace.Get
-//	    logger.Info("Namespace disabled") // Skipped due to disabled namespace
-//	}
+// namespaceRule stores the cached result of Enabled.
+type namespaceRule struct {
+	isEnabledByRule  bool
+	isDisabledByRule bool
+}
+
+// Namespace manages thread-safe namespace enable/disable states with caching.
+// The store holds explicit user-defined rules (path -> bool).
+// The cache holds computed effective states for paths (path -> namespaceRule)
+// based on hierarchical rules to optimize lookups.
 type Namespace struct {
-	store sync.Map // Stores path -> bool (enabled/disabled) for explicit namespace states
-	cache sync.Map // Stores path -> bool (cached enabled state) for computed hierarchy states
+	store sync.Map // path (string) -> rule (bool: true=enable, false=disable)
+	cache sync.Map // path (string) -> namespaceRule
 }
 
-// Load retrieves a value from the store sync.Map.
-// It returns the value and a boolean indicating whether the key exists. Used internally
-// by Get and ll.Logger.NamespaceEnabled to check namespace states. Thread-safe via sync.Map.
-// Example (internal usage):
-//
-//	if val, ok := ns.Load("parent/child"); ok {
-//	    enabled := val.(bool) // true or false
-//	}
-func (ns *Namespace) Load(key any) (value any, ok bool) {
-	return ns.store.Load(key)
-}
-
-// Store sets a value in the store sync.Map.
-// It stores the key-value pair, overwriting any existing value. Used internally by Set
-// to update namespace states. Thread-safe via sync.Map.
-// Example (internal usage):
-//
-//	ns.Store("parent/child", true) // Enable namespace
-func (ns *Namespace) Store(key, value any) {
-	ns.store.Store(key, value)
-}
-
-// Set sets the enable/disable state for a namespace and invalidates the cache.
-// It stores the enabled/disabled state for the specified namespace path and clears the cache
-// for the path and its descendants to ensure updated hierarchy states. Thread-safe via sync.Map.
-// Example (via ll package):
-//
-//	logger := ll.New("parent").NamespaceDisable("parent/child") // Calls Set("parent/child", false)
-//	logger.Namespace("child").Info("Ignored") // No output due to disabled namespace
+// Set defines an explicit enable/disable rule for a namespace path.
+// It clears the cache to ensure subsequent lookups reflect the change.
 func (ns *Namespace) Set(path string, enabled bool) {
-	// Store the enable/disable state
 	ns.store.Store(path, enabled)
-	// Invalidate cache for the path
-	ns.cache.Delete(path)
-	// Invalidate cache for all descendant paths
+	ns.clearCache()
+}
+
+// Load retrieves an explicit rule from the store for a path.
+// Returns the rule (true=enable, false=disable) and whether it exists.
+// Does not consider hierarchy or caching.
+func (ns *Namespace) Load(path string) (rule interface{}, found bool) {
+	return ns.store.Load(path)
+}
+
+// Store directly sets a rule in the store, bypassing cache invalidation.
+// Intended for internal use or sync.Map parity; prefer Set for standard use.
+func (ns *Namespace) Store(path string, rule bool) {
+	ns.store.Store(path, rule)
+}
+
+// clearCache clears the cache of Enabled results.
+// Called by Set to ensure consistency after rule changes.
+func (ns *Namespace) clearCache() {
 	ns.cache.Range(func(key, _ interface{}) bool {
-		if k, ok := key.(string); ok && strings.HasPrefix(k, path+Slash) {
-			ns.cache.Delete(k)
-		}
+		ns.cache.Delete(key)
 		return true
 	})
-	// Note: Commented-out debug print removed for production; consider logging via ll.Logger if needed
-	// fmt.Printf("Namespace %s: storing %s=%v\n", path, path, enabled)
 }
 
-// Get retrieves the enable/disable state for a namespace.
-// It returns the state (true for enabled, false for disabled) and a boolean indicating whether
-// the namespace has an explicit state in the store. If no state is found, it defaults to
-// enabled (true, false). Thread-safe via sync.Map.
-// Example (via ll package):
+// Enabled checks if a path is enabled by namespace rules, considering the most
+// specific rule (path or closest prefix) in the store. Results are cached.
+// Args:
+//   - path: Absolute namespace path to check.
+//   - separator: Character delimiting path segments (e.g., "/", ".").
 //
-//	logger := ll.New("parent")
-//	enabled, exists := logger.namespaces.Get("parent/child") // Returns true, false (default enabled)
-//	logger.NamespaceDisable("parent/child")
-//	enabled, exists = logger.namespaces.Get("parent/child") // Returns false, true
-func (ns *Namespace) Get(path string) (bool, bool) {
-	if val, ok := ns.store.Load(path); ok {
-		return val.(bool), true
+// Returns:
+//   - isEnabledByRule: True if an explicit rule enables the path.
+//   - isDisabledByRule: True if an explicit rule disables the path.
+//
+// If both are false, no explicit rule applies to the path or its prefixes.
+func (ns *Namespace) Enabled(path string, separator string) (isEnabledByRule bool, isDisabledByRule bool) {
+	if path == "" { // Root path has no explicit rule
+		return false, false
 	}
-	return true, false // Default enabled
+
+	// Check cache
+	if cachedValue, found := ns.cache.Load(path); found {
+		if state, ok := cachedValue.(namespaceRule); ok {
+			return state.isEnabledByRule, state.isDisabledByRule
+		}
+		ns.cache.Delete(path) // Remove invalid cache entry
+	}
+
+	// Compute: Most specific rule wins
+	parts := strings.Split(path, separator)
+	computedIsEnabled := false
+	computedIsDisabled := false
+
+	for i := len(parts); i >= 1; i-- {
+		currentPrefix := strings.Join(parts[:i], separator)
+		if val, ok := ns.store.Load(currentPrefix); ok {
+			if rule := val.(bool); rule {
+				computedIsEnabled = true
+				computedIsDisabled = false
+			} else {
+				computedIsEnabled = false
+				computedIsDisabled = true
+			}
+			break
+		}
+	}
+
+	// Cache result, including (false, false) for no rule
+	ns.cache.Store(path, namespaceRule{
+		isEnabledByRule:  computedIsEnabled,
+		isDisabledByRule: computedIsDisabled,
+	})
+
+	return computedIsEnabled, computedIsDisabled
 }

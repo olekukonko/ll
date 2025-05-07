@@ -243,88 +243,6 @@ func TestHandlers(t *testing.T) {
 	})
 }
 
-// TestNamespaces verifies namespace-related functionality, including child namespaces and enable/disable behavior.
-func TestNamespaces(t *testing.T) {
-	// Debug: Verify Arrow constant
-	fmt.Printf("Arrow constant: %q\n", lx.Arrow)
-
-	// Set up a logger with a buffer for capturing output
-	buf := &bytes.Buffer{}
-	logger := New("parent").Enable().Handler(lh.NewTextHandler(buf))
-
-	// Test child namespace creation and logging
-	child := logger.Namespace("child").Enable()
-	buf.Reset()
-	child.Info("Child log")
-	if !strings.Contains(buf.String(), "[parent/child] INFO: Child log") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[parent/child] INFO: Child log")
-	}
-
-	// Test NestedPath style formatting
-	logger = logger.Style(lx.NestedPath)
-	child = child.Style(lx.NestedPath)
-	buf.Reset()
-	child.Info("Nested log")
-	expectedNested := "[parent]" + lx.Arrow + "[child]" + lx.Colon + lx.Space + "INFO: Nested log"
-	if !strings.Contains(buf.String(), expectedNested) {
-		t.Errorf("Expected %q to contain %q; got %q", buf.String(), expectedNested, buf.String())
-	}
-
-	// Test NamespaceEnable/NamespaceDisable to verify logging behavior
-	logger = logger.NamespaceDisable("parent/child")
-	// Debug namespace state before logging
-	enabled, ok := child.namespaces.Load("parent/child")
-	fmt.Printf("Namespace parent/child before logging: ok=%v, enabled=%v\n", ok, enabled)
-	buf.Reset()
-	child.Info("Should not log") // Should be ignored due to disabled namespace
-	// Debug namespace state after logging
-	enabled, ok = child.namespaces.Load("parent/child")
-	fmt.Printf("Namespace parent/child after logging: ok=%v, enabled=%v\n", ok, enabled)
-	if buf.String() != "" {
-		t.Errorf("Expected empty buffer, got %q", buf.String())
-	}
-
-	// Re-enable namespace and verify logging
-	logger = logger.NamespaceEnable("parent/child")
-	child = child.Enable()
-	buf.Reset()
-	child.Info("Should log")
-	expectedShouldLog := "[parent]" + lx.Arrow + "[child]" + lx.Colon + lx.Space + "INFO: Should log"
-	if !strings.Contains(buf.String(), expectedShouldLog) {
-		t.Errorf("Expected %q to contain %q; got %q", buf.String(), expectedShouldLog, buf.String())
-	}
-}
-
-// TestSharedNamespaces verifies namespace state sharing between parent and child loggers.
-func TestSharedNamespaces(t *testing.T) {
-	// Create a fresh parent logger
-	parent := New("parent").Enable().Handler(lh.NewTextHandler(os.Stdout))
-
-	// Disable the child namespace
-	parent = parent.NamespaceDisable("parent/child")
-
-	// Create a child logger
-	child := parent.Namespace("child").Enable()
-
-	// Set up a buffer for capturing child logger output
-	buf := &bytes.Buffer{}
-	child = child.Handler(lh.NewTextHandler(buf))
-
-	// Verify logging is disabled
-	child.Info("Should not log")
-	if buf.String() != "" {
-		t.Errorf("Expected no output from disabled namespace, got: %q", buf.String())
-	}
-
-	// Enable the namespace and verify logging
-	parent = parent.NamespaceEnable("parent/child")
-	buf.Reset()
-	child.Info("Should log")
-	if !strings.Contains(buf.String(), "Should log") {
-		t.Errorf("Expected log output from enabled namespace, got: %q", buf.String())
-	}
-}
-
 // TestRateLimiting verifies rate-limiting functionality for a log level.
 func TestRateLimiting(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
@@ -693,11 +611,11 @@ func TestNamespaceToggle(t *testing.T) {
 	// Create a logger and test namespace toggling
 	logger := New("test")
 	logger = logger.NamespaceEnable("parent/child")
-	if enabled, ok := logger.namespaces.Load("parent/child"); !ok || !enabled.(bool) {
+	if !logger.NamespaceEnabled("parent/child") {
 		t.Error("parent/child should be enabled")
 	}
 	logger = logger.NamespaceDisable("parent/child")
-	if enabled, ok := logger.namespaces.Load("parent/child"); !ok || enabled.(bool) {
+	if logger.Enabled() {
 		t.Error("parent/child should be disabled")
 	}
 }

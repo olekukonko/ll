@@ -32,18 +32,18 @@ func (s *Sampling) Set(level lx.LevelType, rate float64) *Sampling {
 func (s *Sampling) Handle(e *lx.Entry) error {
 	rate, exists := s.rates[e.Level]
 	if !exists {
-		fmt.Printf("Sampling: No rate for level %v\n", e.Level)
+		// fmt.Printf("Sampling: No rate for level %v\n", e.Level)
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	random := rand.Float64()
 	if random <= rate {
-		fmt.Printf("Sampling: rate=%v, random=%v, allowing log\n", rate, random)
+		// fmt.Printf("Sampling: rate=%v, random=%v, allowing log\n", rate, random)
 		return nil
 	}
 	s.stats[e.Level]++
-	fmt.Printf("Sampling: rate=%v, random=%v, rejecting log\n", rate, random)
+	// fmt.Printf("Sampling: rate=%v, random=%v, rejecting log\n", rate, random)
 	return fmt.Errorf("sampling error")
 }
 

@@ -16,6 +16,11 @@ import (
 // Thread-safe via the lx.Namespace struct’s sync.Map.
 var defaultStore = &lx.Namespace{}
 
+// systemActive indicates if the global logging system is active.
+// Defaults to true, meaning logging is active unless explicitly shut down.
+// Or, default to false and require an explicit ll.Start(). Let's default to true for less surprise.
+var systemActive int32 = 1 // 1 for true, 0 for false (for atomic operations)
+
 // Logger is the core structure for logging, managing configuration and behavior.
 // It encapsulates all logging state, including enablement, log level, namespaces,
 // context fields, output style, handler, middleware, and formatting options.
@@ -315,8 +320,13 @@ func (l *Logger) Namespace(name string) *Logger {
 //
 //	logger := New("parent").Enable().NamespaceEnable("parent/child")
 //	logger.Namespace("child").Info("Log") // Output: [parent/child] INFO: Log
-func (l *Logger) NamespaceEnable(path string) *Logger {
-	l.namespaces.Set(path, true)
+func (l *Logger) NamespaceEnable(relativePath string) *Logger {
+	l.mu.RLock()
+	fullPath := l.joinPath(l.currentPath, relativePath)
+	l.mu.RUnlock()
+
+	// fmt.Printf("[DEBUG] NamespaceEnable: logger.currentPath=%q, relativePath=%q, fullPath SETTING to true: %q\n", l.currentPath, relativePath, fullPath) // DEBUG
+	l.namespaces.Set(fullPath, true)
 	return l
 }
 
@@ -327,8 +337,13 @@ func (l *Logger) NamespaceEnable(path string) *Logger {
 //
 //	logger := New("parent").Enable().NamespaceDisable("parent/child")
 //	logger.Namespace("child").Info("Ignored") // No output
-func (l *Logger) NamespaceDisable(path string) *Logger {
-	l.namespaces.Set(path, false)
+func (l *Logger) NamespaceDisable(relativePath string) *Logger {
+	l.mu.RLock()
+	fullPath := l.joinPath(l.currentPath, relativePath)
+	l.mu.RUnlock()
+
+	// fmt.Printf("[DEBUG] NamespaceDisable: logger.currentPath=%q, relativePath=%q, fullPath SETTING to false: %q\n", l.currentPath, relativePath, fullPath) // DEBUG
+	l.namespaces.Set(fullPath, false)
 	return l
 }
 
@@ -339,36 +354,33 @@ func (l *Logger) NamespaceDisable(path string) *Logger {
 //
 //	logger := New("parent").Enable().NamespaceDisable("parent/child")
 //	enabled := logger.NamespaceEnabled("parent/child") // false
-func (l *Logger) NamespaceEnabled(path string) bool {
+func (l *Logger) NamespaceEnabled(relativePath string) bool {
 	l.mu.RLock()
-	defer l.mu.RUnlock()
-	enabled := true
-	if path != "" {
-		// Check cache first
-		if cached, ok := l.namespaces.Load(path); ok {
-			return cached.(bool)
-		}
-
-		// default separator
-		if l.separator == "" {
-			l.separator = lx.Slash
-		}
-
-		// Compute enabled state by checking parent namespaces
-		parts := strings.Split(path, l.separator)
-		for i := 1; i <= len(parts); i++ {
-			p := strings.Join(parts[:i], l.separator)
-			if val, ok := l.namespaces.Load(p); ok {
-				if !val.(bool) {
-					enabled = false
-					break
-				}
-			}
-		}
-		// Cache the result
-		l.namespaces.Store(path, enabled)
+	fullPath := l.joinPath(l.currentPath, relativePath)
+	separator := l.separator
+	if separator == "" {
+		separator = lx.Slash
 	}
-	return enabled
+	instanceEnabled := l.enabled
+	l.mu.RUnlock()
+
+	// fmt.Printf("[DEBUG] NamespaceEnabled CHECK: logger.currentPath=%q, relativePath=%q, fullPath CHECKING: %q, instanceEnabled: %v\n", l.currentPath, relativePath, fullPath, instanceEnabled) // DEBUG
+	if fullPath == "" && relativePath == "" {
+		return instanceEnabled
+	}
+
+	if fullPath != "" {
+		isEnabledByNSRule, isDisabledByNSRule := l.namespaces.Enabled(fullPath, separator)
+		// fmt.Printf("[DEBUG] Enabled(%q) -> isEnabled:%v, isDisabled:%v\n", fullPath, isEnabledByNSRule, isDisabledByNSRule) // DEBUG
+
+		if isDisabledByNSRule {
+			return false
+		}
+		if isEnabledByNSRule {
+			return true
+		}
+	}
+	return instanceEnabled
 }
 
 // Use adds a middleware function to process log entries before they are handled.
@@ -778,40 +790,63 @@ func (l *Logger) log(level lx.LevelType, msg string, fields map[string]interface
 //	    // Log would be skipped
 //	}
 func (l *Logger) shouldLog(level lx.LevelType) bool {
-	// Check if logger is disabled or level is below minimum
-	if !l.enabled || level < l.level {
+
+	if !Active() { // Assuming Active is in the 'll' package or imported
 		return false
 	}
 
-	// Check namespace hierarchy
-	enabled := true
-	if l.currentPath != "" {
-		// Try cache first
-		if cached, ok := l.namespaces.Load(l.currentPath); ok {
-			enabled = cached.(bool)
-		} else {
-			// defaults to slash
-			if l.separator == "" {
-				l.separator = lx.Slash
-			}
-			// Compute enabled state by checking parent namespaces
-			parts := strings.Split(l.currentPath, l.separator)
-			for i := 1; i <= len(parts); i++ {
-				path := strings.Join(parts[:i], l.separator)
-				if val, ok := l.namespaces.Load(path); ok {
-					if !val.(bool) {
-						enabled = false
-						break
-					}
-				}
-			}
-			// Cache the result
-			l.namespaces.Store(l.currentPath, enabled)
+	// 1. Check log level (cheap filter)
+	if level < l.level {
+		return false
+	}
+
+	// 2. Check namespace rules from the global store
+	// Use the logger's configured separator, defaulting to lx.Slash if not set
+	separator := l.separator
+	if separator == "" {
+		separator = lx.Slash
+	}
+
+	if l.currentPath != "" { // Only check namespace rules if a path is set
+		isEnabledByNSRule, isDisabledByNSRule := l.namespaces.Enabled(l.currentPath, separator)
+
+		if isDisabledByNSRule {
+			return false // Explicitly disabled by a namespace rule
 		}
+		if isEnabledByNSRule {
+			return true // Explicitly enabled by a namespace rule (overrides logger.enabled if it was false)
+		}
+		// If neither isEnabledByNSRule nor isDisabledByNSRule is true,
+		// it means no explicit namespace rule applies directly to this path or its parents.
+		// In this case, we fall through to check the logger's instance 'enabled' flag.
 	}
-	if !enabled {
+
+	// 3. If no overriding namespace rule was found (or no path),
+	//    check the logger instance's 'enabled' flag.
+	if !l.enabled {
 		return false
 	}
 
+	// If we reach here:
+	// - Level is sufficient.
+	// - EITHER:
+	//    - Namespace path is explicitly enabled by a rule.
+	//    - OR Namespace path has no overriding rule, and l.enabled is true.
 	return true
+}
+
+// joinPath joins a base path and a relative path using the logger's separator.
+// Handles cases where base or relative path might be empty.
+func (l *Logger) joinPath(base, relative string) string {
+	if base == "" {
+		return relative
+	}
+	if relative == "" {
+		return base
+	}
+	separator := l.separator
+	if separator == "" {
+		separator = lx.Slash // Default separator
+	}
+	return base + separator + relative
 }

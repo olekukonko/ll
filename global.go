@@ -2,6 +2,7 @@ package ll
 
 import (
 	"github.com/olekukonko/ll/lx"
+	"sync/atomic"
 	"time"
 )
 
@@ -187,4 +188,30 @@ func Print(args ...any) {
 // for chaining, allowing further field additions or logging. Thread-safe via the logger’s mutex.
 func Err(errs ...error) *Logger {
 	return defaultLogger.Err(errs...)
+}
+
+// Start activates the global logging system.
+// If the system was shut down, this re-enables all logging operations,
+// subject to individual logger and namespace configurations.
+// This function is thread-safe.
+func Start() {
+	atomic.StoreInt32(&systemActive, 1)
+	// Optionally, log that the system has started, using a basic un-blockable mechanism
+	// if defaultLogger might itself be affected by the shutdown.
+	// For now, let's keep it simple.
+}
+
+// Shutdown deactivates the global logging system.
+// All logging operations will be skipped, regardless of individual logger
+// or namespace configurations, until Start() is called again.
+// This function is thread-safe.
+func Shutdown() {
+	atomic.StoreInt32(&systemActive, 0)
+	// Optionally, perform cleanup like flushing handlers here in the future.
+}
+
+// Active returns true if the global logging system is currently active.
+// This function is thread-safe.
+func Active() bool {
+	return atomic.LoadInt32(&systemActive) == 1
 }
