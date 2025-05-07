@@ -33,6 +33,7 @@ type Logger struct {
 	prefix          string                 // Prefix prepended to log messages
 	indent          int                    // Number of double spaces to indent messages
 	stackBufferSize int                    // Buffer size for stack trace capture
+	separator       string
 }
 
 // New creates a new logger instance with the specified namespace.
@@ -54,6 +55,7 @@ func New(namespace string) *Logger {
 		handler:         lh.NewTextHandler(os.Stdout), // Default text handler to stdout
 		middleware:      make([]Middleware, 0),        // Empty middleware chain
 		stackBufferSize: 4096,                         // Default stack trace buffer size
+		separator:       lx.Slash,
 	}
 }
 
@@ -81,6 +83,7 @@ func (l *Logger) Clone() *Logger {
 		prefix:          l.prefix,
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
+		separator:       lx.Slash,
 	}
 }
 
@@ -110,6 +113,7 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 		prefix:          l.prefix,
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
+		separator:       lx.Slash,
 	}
 
 	// Copy parent’s context fields
@@ -284,7 +288,7 @@ func (l *Logger) Namespace(name string) *Logger {
 	// Construct full namespace path
 	fullPath := name
 	if l.currentPath != "" {
-		fullPath = l.currentPath + lx.Slash + name
+		fullPath = l.currentPath + l.separator + name
 	}
 
 	// Create child logger with inherited configuration
@@ -300,6 +304,7 @@ func (l *Logger) Namespace(name string) *Logger {
 		prefix:          l.prefix,
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
+		separator:       l.separator,
 	}
 }
 
@@ -343,10 +348,16 @@ func (l *Logger) NamespaceEnabled(path string) bool {
 		if cached, ok := l.namespaces.Load(path); ok {
 			return cached.(bool)
 		}
+
+		// default separator
+		if l.separator == "" {
+			l.separator = lx.Slash
+		}
+
 		// Compute enabled state by checking parent namespaces
-		parts := strings.Split(path, lx.Slash)
+		parts := strings.Split(path, l.separator)
 		for i := 1; i <= len(parts); i++ {
-			p := strings.Join(parts[:i], lx.Slash)
+			p := strings.Join(parts[:i], l.separator)
 			if val, ok := l.namespaces.Load(p); ok {
 				if !val.(bool) {
 					enabled = false
@@ -388,6 +399,13 @@ func (l *Logger) Use(fn lx.Handler) *Middleware {
 		logger: l,
 		id:     id,
 	}
+}
+
+// Separator is use to group namespaces and log entries.
+func (l *Logger) Separator(separator string) {
+	l.mu.Lock()
+	l.mu.Unlock()
+	l.separator = separator
 }
 
 // Remove removes middleware by the reference returned from Use.
@@ -771,10 +789,14 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 		if cached, ok := l.namespaces.Load(l.currentPath); ok {
 			enabled = cached.(bool)
 		} else {
+			// defaults to slash
+			if l.separator == "" {
+				l.separator = lx.Slash
+			}
 			// Compute enabled state by checking parent namespaces
-			parts := strings.Split(l.currentPath, lx.Slash)
+			parts := strings.Split(l.currentPath, l.separator)
 			for i := 1; i <= len(parts); i++ {
-				path := strings.Join(parts[:i], lx.Slash)
+				path := strings.Join(parts[:i], l.separator)
 				if val, ok := l.namespaces.Load(path); ok {
 					if !val.(bool) {
 						enabled = false

@@ -16,6 +16,7 @@ const (
 	LeftBracket  = "["  // Opening bracket for namespaces and fields (e.g., [app])
 	RightBracket = "]"  // Closing bracket for namespaces and fields (e.g., [app])
 	Colon        = ":"  // Separator after namespace or level (e.g., [app]: INFO:)
+	Dot          = "."  // Separator for namespace paths (e.g., "parent.child")
 )
 
 // DefaultEnabled defines the default logging state (disabled).

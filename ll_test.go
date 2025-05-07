@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 		context:    make(map[string]interface{}),
 		style:      lx.FlatPath,
 		handler:    nil,
+		separator:  lx.Slash,
 	}
 	// Run tests and exit with the appropriate status code
 	os.Exit(m.Run())
@@ -395,6 +396,7 @@ func TestConditionalLogging(t *testing.T) {
 		context:    make(map[string]interface{}),
 		style:      lx.FlatPath,
 		handler:    nil,
+		separator:  lx.Slash,
 	}
 
 	// Set up a logger with a buffer for capturing output
@@ -662,6 +664,7 @@ func TestHandlerErrors(t *testing.T) {
 		context:    make(map[string]interface{}),
 		style:      lx.FlatPath,
 		handler:    nil,
+		separator:  lx.Slash,
 	}
 
 	// Test single TextHandler
