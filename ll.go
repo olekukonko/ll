@@ -512,9 +512,11 @@ func (l *Logger) Info(format string, args ...any) {
 //	logger := New("app").Enable()
 //	duration := logger.Measure(func() { time.Sleep(time.Millisecond) })
 //	// Output: [app] INFO: function executed [duration=~1ms]
-func (l *Logger) Measure(fn func()) time.Duration {
+func (l *Logger) Measure(fns ...func()) time.Duration {
 	start := time.Now()
-	fn()
+	for _, fn := range fns {
+		fn()
+	}
 	duration := time.Since(start)
 	l.Fields("duration", duration).Info("function executed")
 	return duration

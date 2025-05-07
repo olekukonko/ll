@@ -135,9 +135,11 @@ func Stack(format string, args ...any) {
 //
 //	duration := ll.Measure(func() { time.Sleep(time.Millisecond) })
 //	// Output: [] INFO: function executed [duration=1.002ms]
-func Measure(fn func()) time.Duration {
+func Measure(fns ...func()) time.Duration {
 	start := time.Now()
-	fn()
+	for _, fn := range fns {
+		fn()
+	}
 	duration := time.Since(start)
 	defaultLogger.Fields("duration", duration).Info("function executed")
 	return duration
@@ -153,19 +155,6 @@ func Measure(fn func()) time.Duration {
 //	ll.Benchmark(start) // Output: [] INFO: benchmark [start=... end=... duration=...]
 func Benchmark(start time.Time) {
 	defaultLogger.Fields("start", start, "end", time.Now(), "duration", time.Now().Sub(start)).Info("benchmark")
-}
-
-// Timed logs the duration of a function’s execution at Info level.
-// It measures the time taken to execute the provided function and logs it with "start",
-// "end", and "duration" fields using defaultLogger. Thread-safe.
-// Example:
-//
-//	ll.Timed(func() { time.Sleep(time.Millisecond) })
-//	// Output: [] INFO: timed [start=... end=... duration=...]
-func Timed(fn func()) {
-	start := time.Now()
-	fn()
-	defaultLogger.Fields("start", start, "end", time.Now(), "duration", time.Now().Sub(start)).Info("timed")
 }
 
 // Clone returns a new logger with the same configuration as the default logger.
