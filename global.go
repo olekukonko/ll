@@ -1,9 +1,7 @@
 package ll
 
 import (
-	"fmt"
 	"github.com/olekukonko/ll/lx"
-	"strings"
 	"time"
 )
 
@@ -190,13 +188,14 @@ func Clone() *Logger {
 //	ll.Print("message", "value") // Output: [] INFO: message value
 func Print(args ...any) {
 	// Build the message by concatenating arguments with spaces
-	var builder strings.Builder
-	for i, arg := range args {
-		if i > 0 {
-			builder.WriteString(lx.Space)
-		}
-		builder.WriteString(fmt.Sprint(arg))
-	}
-	// Log at Info level without fields or stack trace
-	defaultLogger.log(lx.LevelInfo, builder.String(), nil, false)
+	defaultLogger.Print(args...)
+}
+
+// Err adds one or more errors to the FieldBuilder as a field and logs them.
+// It stores non-nil errors in the "error" field: a single error if only one is non-nil,
+// or a slice of errors if multiple are non-nil. It logs the concatenated string representations
+// of non-nil errors (e.g., "failed 1; failed 2") at the Error level. Returns the FieldBuilder
+// for chaining, allowing further field additions or logging. Thread-safe via the logger’s mutex.
+func Err(errs ...error) *Logger {
+	return defaultLogger.Err(errs...)
 }

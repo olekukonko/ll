@@ -567,6 +567,59 @@ func (l *Logger) Error(format string, args ...any) {
 	l.log(lx.LevelError, msg, nil, false)
 }
 
+// Err adds one or more errors to the logger’s context and logs them.
+// It stores non-nil errors in the "error" context field: a single error if only one is non-nil,
+// or a slice of errors if multiple are non-nil. It logs the concatenated string representations
+// of non-nil errors (e.g., "failed 1; failed 2") at the Error level. Returns the Logger for chaining,
+// allowing further configuration or logging. Thread-safe via the logger’s mutex.
+// Example:
+//
+//	logger := New("app").Enable()
+//	err1 := errors.New("failed 1")
+//	err2 := errors.New("failed 2")
+//	logger.Err(err1, err2).Info("Error occurred")
+//	// Output: [app] ERROR: failed 1; failed 2
+//	//         [app] INFO: Error occurred [error=[failed 1 failed 2]]
+func (l *Logger) Err(errs ...error) *Logger {
+	l.mu.Lock()
+	// Initialize context if nil
+	if l.context == nil {
+		l.context = make(map[string]interface{})
+	}
+
+	// Collect non-nil errors and build log message
+	var nonNilErrors []error
+	var builder strings.Builder
+	count := 0
+	for i, err := range errs {
+		if err != nil {
+			if i > 0 && count > 0 {
+				builder.WriteString("; ")
+			}
+			builder.WriteString(err.Error())
+			nonNilErrors = append(nonNilErrors, err)
+			count++
+		}
+	}
+
+	// Set error context field and log if there are non-nil errors
+	if count > 0 {
+		if count == 1 {
+			// Store single error directly
+			l.context["error"] = nonNilErrors[0]
+		} else {
+			// Store slice of errors
+			l.context["error"] = nonNilErrors
+		}
+		// Log concatenated error messages at Error level
+		l.log(lx.LevelError, builder.String(), nil, false)
+	}
+	l.mu.Unlock()
+
+	// Return Logger for chaining
+	return l
+}
+
 // Stack logs a message at Error level with a stack trace.
 // It formats the message and delegates to the internal log method with a stack trace.
 // Thread-safe.

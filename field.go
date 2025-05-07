@@ -156,19 +156,54 @@ func (fb *FieldBuilder) Panic(args ...any) {
 	panic(msg)
 }
 
-// Err adds an error to the FieldBuilder as a string field.
-// It stores the error’s string representation under the "error" key if the error is non-nil.
-// Returns the FieldBuilder for chaining, allowing further field additions or logging.
+// Err adds one or more errors to the FieldBuilder as a field and logs them.
+// It stores non-nil errors in the "error" field: a single error if only one is non-nil,
+// or a slice of errors if multiple are non-nil. It logs the concatenated string representations
+// of non-nil errors (e.g., "failed 1; failed 2") at the Error level. Returns the FieldBuilder
+// for chaining, allowing further field additions or logging. Thread-safe via the logger’s mutex.
 // Example:
 //
 //	logger := New("app").Enable()
-//	err := errors.New("failed")
-//	logger.Fields("k", "v").Err(err).Info("Error") // Output: [app] INFO: Error [error=failed k=v]
-func (fb *FieldBuilder) Err(err error) *FieldBuilder {
-	// Add error field only if the error is non-nil
-	if err != nil {
-		fb.fields["error"] = err.Error()
+//	err1 := errors.New("failed 1")
+//	err2 := errors.New("failed 2")
+//	logger.Fields("k", "v").Err(err1, err2).Info("Error occurred")
+//	// Output: [app] ERROR: failed 1; failed 2
+//	//         [app] INFO: Error occurred [error=[failed 1 failed 2] k=v]
+func (fb *FieldBuilder) Err(errs ...error) *FieldBuilder {
+	// Initialize fields map if nil
+	if fb.fields == nil {
+		fb.fields = make(map[string]interface{})
 	}
+
+	// Collect non-nil errors and build log message
+	var nonNilErrors []error
+	var builder strings.Builder
+	count := 0
+	for i, err := range errs {
+		if err != nil {
+			if i > 0 && count > 0 {
+				builder.WriteString("; ")
+			}
+			builder.WriteString(err.Error())
+			nonNilErrors = append(nonNilErrors, err)
+			count++
+		}
+	}
+
+	// Set error field and log if there are non-nil errors
+	if count > 0 {
+		if count == 1 {
+			// Store single error directly
+			fb.fields["error"] = nonNilErrors[0]
+		} else {
+			// Store slice of errors
+			fb.fields["error"] = nonNilErrors
+		}
+		// Log concatenated error messages at Error level
+		fb.logger.log(lx.LevelError, builder.String(), nil, false)
+	}
+
+	// Return FieldBuilder for chaining
 	return fb
 }
 
