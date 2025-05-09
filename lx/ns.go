@@ -1,4 +1,3 @@
-// lx/ns.go
 package lx
 
 import (

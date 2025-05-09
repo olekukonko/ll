@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,29 +40,41 @@ type Logger struct {
 	indent          int                    // Number of double spaces to indent messages
 	stackBufferSize int                    // Buffer size for stack trace capture
 	separator       string
+	entries         atomic.Int64
 }
 
-// New creates a new logger instance with the specified namespace.
+// New creates a new logger instance with the specified namespace and optional configurations.
 // It initializes the logger with default settings: disabled, Debug level, flat namespace style,
-// a text handler writing to os.Stdout, and an empty middleware chain. The namespace defines
-// the logger’s context (e.g., "app" or "app/db"). Thread-safe via mutex-protected methods.
+// a text handler writing to os.Stdout, and an empty middleware chain. Options can override
+// defaults (e.g., WithHandler, WithLevel). Thread-safe via mutex-protected methods.
 // Example:
 //
-//	logger := New("app").Enable()
+//	logger := New("app", WithHandler(lh.NewTextHandler(os.Stdout))).Enable()
 //	logger.Info("Starting application") // Output: [app] INFO: Starting application
-func New(namespace string) *Logger {
-	return &Logger{
-		enabled:         lx.DefaultEnabled,            // Initially disabled (lx.DefaultEnabled = false)
-		level:           lx.LevelDebug,                // Default to Debug level
-		namespaces:      defaultStore,                 // Use shared namespace store
-		currentPath:     namespace,                    // Set namespace path
-		context:         make(map[string]interface{}), // Empty context for fields
-		style:           lx.FlatPath,                  // Default to flat namespace style
-		handler:         lh.NewTextHandler(os.Stdout), // Default text handler to stdout
-		middleware:      make([]Middleware, 0),        // Empty middleware chain
-		stackBufferSize: 4096,                         // Default stack trace buffer size
+//
+//	logger := New("test", WithHandler(NewMemoryHandler())).Enable()
+//	logger.Info("Test message")
+//	entries := logger.handler.(*MemoryHandler).Entries()
+func New(namespace string, opts ...Option) *Logger {
+	logger := &Logger{
+		enabled:         lx.DefaultEnabled,
+		level:           lx.LevelDebug,
+		namespaces:      defaultStore,
+		currentPath:     namespace,
+		context:         make(map[string]interface{}),
+		style:           lx.FlatPath,
+		handler:         lh.NewTextHandler(os.Stdout),
+		middleware:      make([]Middleware, 0),
+		stackBufferSize: 4096,
 		separator:       lx.Slash,
 	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(logger)
+	}
+
+	return logger
 }
 
 // Clone creates a new logger with the same configuration and namespace as the parent.
@@ -665,6 +678,11 @@ func (l *Logger) Stack(format string, args ...any) {
 	l.log(lx.LevelError, msg, nil, true)
 }
 
+// Len counts the total number of values sent to handler
+func (l *Logger) Len() int64 {
+	return l.entries.Load()
+}
+
 // Fatal logs a message at Error level with a stack trace and exits the program.
 // It constructs the message from variadic arguments, logs it with a stack trace, and
 // terminates with exit code 1. Thread-safe.
@@ -777,6 +795,7 @@ func (l *Logger) log(level lx.LevelType, msg string, fields map[string]interface
 	// Pass to handler if set
 	if l.handler != nil {
 		_ = l.handler.Handle(entry)
+		l.entries.Add(1)
 	}
 }
 
@@ -849,4 +868,28 @@ func (l *Logger) joinPath(base, relative string) string {
 		separator = lx.Slash // Default separator
 	}
 	return base + separator + relative
+}
+
+// Option defines a functional option for configuring a Logger.
+type Option func(*Logger)
+
+// WithHandler sets the handler for the logger.
+func WithHandler(handler lx.Handler) Option {
+	return func(l *Logger) {
+		l.handler = handler
+	}
+}
+
+// WithLevel sets the minimum log level for the logger.
+func WithLevel(level lx.LevelType) Option {
+	return func(l *Logger) {
+		l.level = level
+	}
+}
+
+// WithStyle sets the namespace formatting style for the logger.
+func WithStyle(style lx.StyleType) Option {
+	return func(l *Logger) {
+		l.style = style
+	}
 }
