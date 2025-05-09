@@ -613,6 +613,19 @@ func (l *Logger) Error(format string, args ...any) {
 	l.log(lx.LevelError, msg, nil, false)
 }
 
+// GetHandler returns the logger's current handler implementation.
+// This provides access to the underlying logging handler for customization
+// or inspection. The returned handler should not be modified concurrently
+// with logger operations.
+//
+// Example:
+//
+//	logger := New("app")
+//	logger.GetHandler
+func (l *Logger) GetHandler() lx.Handler {
+	return l.handler
+}
+
 // Err adds one or more errors to the logger’s context and logs them.
 // It stores non-nil errors in the "error" context field: a single error if only one is non-nil,
 // or a slice of errors if multiple are non-nil. It logs the concatenated string representations
