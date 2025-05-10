@@ -150,7 +150,7 @@ Here's a clear, well-structured documentation section for the debugging features
 
 ---
 
-### 6. Debugging Tools
+### 6. Logging for Debugging
 
 The `ll` package provides specialized debugging utilities that go beyond standard logging:
 
@@ -158,11 +158,19 @@ The `ll` package provides specialized debugging utilities that go beyond standar
 
 1. **`Dbg()` - Contextual Inspection**
 ```go
-x := 42
-user := struct{ Name string }{"Alice"}
+package main
 
-ll.Dbg(x)    // [file.go:123] x = 42
-ll.Dbg(user) // [file.go:124] user = {Name:Alice}
+import (
+  "github.com/olekukonko/ll"
+)
+
+func main() {
+  x := 42
+  user := struct{ Name string }{"Alice"}
+
+  ll.Dbg(x)    // [file.go:123] x = 42
+  ll.Dbg(user) // [file.go:124] user = {Name:Alice}
+}
 ```
 - Shows file/line context
 - Preserves variable names
@@ -170,15 +178,49 @@ ll.Dbg(user) // [file.go:124] user = {Name:Alice}
 
 2. **`Dump()` - Binary Inspection**
 ```go
-data := []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f}
-ll.Dump(data) 
+package main
 
-// Output:
-// pos 00  hex:  48 65 6c 6c 6f     'Hello'
+import (
+  "github.com/olekukonko/ll"
+  "github.com/olekukonko/ll/lh"
+  "os"
+)
+
+func main() {
+  ll.Handler(lh.NewColorizedHandler(os.Stdout))
+
+  ll.Dump("hello\nworld")
+
+  f, _ := os.Open(os.Args[1])
+  ll.Dump(f)
+}
 ```
 - Hex/ASCII view like `hexdump -C`
 - Optimized for strings/bytes
 - Fallback to JSON for complex types
+
+![dump](_example/dump.png "dump")
+
+
+3. **`Stack()` - Stack Inspection**
+```go
+package main
+
+import (
+  "github.com/olekukonko/ll"
+  "github.com/olekukonko/ll/lh"
+  "os"
+)
+
+func main() {
+  ll.Handler(lh.NewColorizedHandler(os.Stdout))
+  ll.Stack("hello")
+}
+
+```
+![stack](_example/stack.png "stack")
+
+
 
 #### Advanced Features
 

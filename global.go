@@ -229,7 +229,7 @@ func Fatal(args ...any) {
 // It constructs the message from variadic arguments, logs it with a stack trace, and
 // triggers a panic. Thread-safe.
 func Panic(args ...any) {
-	defaultLogger.Panic()
+	defaultLogger.Panic(args...)
 }
 
 // Enable activates logging for the current logger.

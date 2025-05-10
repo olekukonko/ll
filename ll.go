@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
+	"io"
 	"math"
 	"os"
 	"reflect"
@@ -695,7 +696,7 @@ func (l *Logger) Err(errs ...error) *Logger {
 //	logger.Stack("Critical error") // Output: [app] ERROR: Critical error [stack=...]
 func (l *Logger) Stack(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.log(lx.LevelError, lx.ClassStack, msg, nil, true)
+	l.log(lx.LevelError, lx.ClassText, msg, nil, true)
 }
 
 // Len counts the total number of values sent to handler
@@ -805,7 +806,6 @@ func (l *Logger) Dump(values ...interface{}) {
 	// Convert any value to bytes
 	for _, value := range values {
 		l.Info("Dumping %v (%T)", value, value)
-
 		var by []byte
 		var err error
 
@@ -828,6 +828,8 @@ func (l *Logger) Dump(values ...interface{}) {
 		case uint, uint8, uint16, uint32, uint64:
 			by = make([]byte, 8)
 			binary.BigEndian.PutUint64(by, reflect.ValueOf(v).Uint())
+		case io.Reader:
+			by, err = io.ReadAll(v)
 		default:
 			by, err = json.Marshal(v) // Fallback to JSON
 		}
@@ -879,6 +881,8 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 		return
 	}
 
+	var stack []byte
+
 	// Capture stack trace if requested
 	if withStack {
 		l.mu.RLock()
@@ -888,7 +892,7 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 		if fields == nil {
 			fields = make(map[string]interface{})
 		}
-		fields["stack"] = string(buf[:n])
+		stack = buf[:n]
 	}
 
 	l.mu.RLock()
@@ -914,6 +918,7 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 		Fields:    fields,
 		Style:     l.style,
 		Class:     class,
+		Stack:     stack,
 	}
 
 	// Add context fields, avoiding overwrites

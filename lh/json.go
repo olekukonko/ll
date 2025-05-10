@@ -29,7 +29,7 @@ type JsonOutput struct {
 	Class     string                 `json:"class"`
 	Msg       string                 `json:"msg"`
 	Namespace string                 `json:"ns"`
-	Stack     []string               `json:"strack"`
+	Stack     []byte                 `json:"stack"`
 	Dump      []dumpSegment          `json:"dump"`
 	Fields    map[string]interface{} `json:"fields"`
 }
@@ -62,9 +62,9 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 		Class:     e.Class.String(),
 		Msg:       e.Message,
 		Namespace: e.Namespace,
-		Stack:     nil,
 		Dump:      nil,
 		Fields:    e.Fields,
+		Stack:     e.Stack,
 	}
 
 	enc := json.NewEncoder(h.writer)
@@ -108,8 +108,8 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 		Class:     e.Class.String(),
 		Msg:       "dumping segments",
 		Namespace: e.Namespace,
-		Stack:     nil,
 		Dump:      segments,
 		Fields:    e.Fields,
+		Stack:     e.Stack,
 	})
 }

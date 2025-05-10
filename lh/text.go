@@ -37,7 +37,7 @@ func (h *TextHandler) Handle(e *lx.Entry) error {
 func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 	var builder strings.Builder
 
-	// Namespace formatting
+	// Namespace
 	switch e.Style {
 	case lx.NestedPath:
 		if e.Namespace != "" {
@@ -53,7 +53,7 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 			builder.WriteString(lx.Colon)
 			builder.WriteString(lx.Space)
 		}
-	default: // FlatPath
+	default:
 		if e.Namespace != "" {
 			builder.WriteString(lx.LeftBracket)
 			builder.WriteString(e.Namespace)
@@ -62,12 +62,10 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 		}
 	}
 
-	// Level
+	// Level and message
 	builder.WriteString(e.Level.String())
 	builder.WriteString(lx.Colon)
 	builder.WriteString(lx.Space)
-
-	// Message
 	builder.WriteString(e.Message)
 
 	// Fields
@@ -90,12 +88,16 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 		builder.WriteString(lx.RightBracket)
 	}
 
+	// Stack (no color, just plain indent)
+	if len(e.Stack) > 0 {
+		h.formatStack(&builder, e.Stack)
+	}
+
 	// Newline
 	if e.Level != lx.LevelNone {
 		builder.WriteString(lx.Newline)
 	}
 
-	// Write to output
 	_, err := h.w.Write([]byte(builder.String()))
 	return err
 }
@@ -112,4 +114,38 @@ func (h *TextHandler) handleDumpOutput(e *lx.Entry) error {
 
 	_, err := h.w.Write([]byte(builder.String()))
 	return err
+}
+
+func (h *TextHandler) formatStack(b *strings.Builder, stack []byte) {
+	lines := strings.Split(string(stack), "\n")
+	if len(lines) == 0 {
+		return
+	}
+
+	b.WriteString("\n[stack]\n")
+
+	// First line: goroutine
+	b.WriteString("  ┌─ ")
+	b.WriteString(lines[0])
+	b.WriteString("\n")
+
+	// Iterate through remaining lines
+	for i := 1; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+
+		if strings.Contains(line, ".go") {
+			// File path lines get extra indent
+			b.WriteString("  ├       ")
+		} else {
+			// Function names
+			b.WriteString("  │   ")
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("  └\n")
 }

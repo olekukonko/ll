@@ -106,7 +106,7 @@ func (fb *FieldBuilder) Stack(format string, args ...any) {
 	// Format the message
 	msg := fmt.Sprintf(format, args...)
 	// Log at Error level with the builder’s fields and a stack trace
-	fb.logger.log(lx.LevelError, lx.ClassStack, msg, fb.fields, true)
+	fb.logger.log(lx.LevelError, lx.ClassText, msg, fb.fields, true)
 }
 
 // Fatal logs a message at Error level with a stack trace and the builder’s fields, then exits.

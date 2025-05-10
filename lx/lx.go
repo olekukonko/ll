@@ -44,7 +44,6 @@ const (
 	ClassDump
 	ClassSpecial
 	ClassRaw
-	ClassStack
 )
 
 // Namespace style constants.
@@ -103,6 +102,7 @@ type Entry struct {
 	Style     StyleType              // Namespace formatting style (FlatPath or NestedPath)
 	Error     error                  // Associated error, if any (e.g., for error logs)
 	Class     ClassType
+	Stack     []byte
 	Id        int `json:"-"` // Unique ID for the entry, ignored in JSON output
 }
 
@@ -135,8 +135,6 @@ func (t ClassType) String() string {
 		return "SPECIAL"
 	case ClassRaw:
 		return "RAW"
-	case ClassStack:
-		return "STACK"
 	default:
 		return "UNKNOWN"
 

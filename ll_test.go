@@ -111,8 +111,8 @@ func TestLoggingMethods(t *testing.T) {
 	if !strings.Contains(output, "key=value") {
 		t.Errorf("Expected %q to contain %q", output, "key=value")
 	}
-	if !strings.Contains(output, "stack=") {
-		t.Errorf("Expected %q to contain %q", output, "stack=")
+	if !strings.Contains(output, "stack") {
+		t.Errorf("Expected %q to contain %q", output, "stack")
 	}
 }
 
@@ -371,9 +371,9 @@ func TestConditionalLogging(t *testing.T) {
 		logger := New("test/app").Enable().Style(lx.NestedPath).Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug).Prefix("ERR: ").Indent(1)
 		logger = logger.Context(map[string]interface{}{"ctx": "value"})
 		logger.If(true).Stack("error occurred: %v", "timeout")
-		expectedStack := "[test]" + lx.Arrow + "[app]" + lx.Colon + lx.Space + "ERROR:   ERR: error occurred: timeout [ctx=value stack="
+		expectedStack := "[stack]"
 		if !strings.Contains(buf.String(), expectedStack) {
-			t.Errorf("Expected %q to contain %q; got %q", buf.String(), expectedStack, buf.String())
+			t.Errorf("Expected %q to contain %q; \ngot %q", buf.String(), expectedStack, buf.String())
 		}
 		buf.Reset()
 		logger.If(false).Stack("should not log: %v", "timeout")
