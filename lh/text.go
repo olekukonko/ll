@@ -20,6 +20,15 @@ func NewTextHandler(w io.Writer) *TextHandler {
 
 // Handle processes a log entry and writes it as plain text.
 func (h *TextHandler) Handle(e *lx.Entry) error {
+	// Special handling for dump output
+	if isDumpOutput(e.Message) {
+		return h.handleDumpOutput(e)
+	}
+	return h.handleRegularOutput(e)
+}
+
+// handleRegularOutput handles normal log entries
+func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 	var builder strings.Builder
 
 	// Namespace formatting
@@ -47,7 +56,7 @@ func (h *TextHandler) Handle(e *lx.Entry) error {
 		}
 	}
 
-	// GetLevel
+	// Level
 	builder.WriteString(e.Level.String())
 	builder.WriteString(lx.Colon)
 	builder.WriteString(lx.Space)
@@ -76,9 +85,25 @@ func (h *TextHandler) Handle(e *lx.Entry) error {
 	}
 
 	// Newline
-	builder.WriteString("\n")
+	if e.Level != lx.LevelNone {
+		builder.WriteString(lx.Newline)
+	}
 
 	// Write to output
+	_, err := h.w.Write([]byte(builder.String()))
+	return err
+}
+
+// handleDumpOutput specially formats hex dump output (plain text version)
+func (h *TextHandler) handleDumpOutput(e *lx.Entry) error {
+	// For text handler, we just add a newline before dump output
+	var builder strings.Builder
+
+	// Add a separator line before dump output
+	builder.WriteString("---- BEGIN DUMP ----\n")
+	builder.WriteString(e.Message)
+	builder.WriteString("---- END DUMP ----\n")
+
 	_, err := h.w.Write([]byte(builder.String()))
 	return err
 }

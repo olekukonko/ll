@@ -17,6 +17,7 @@ const (
 	RightBracket = "]"  // Closing bracket for namespaces and fields (e.g., [app])
 	Colon        = ":"  // Separator after namespace or level (e.g., [app]: INFO:)
 	Dot          = "."  // Separator for namespace paths (e.g., "parent.child")
+	Newline      = "\n" // Separator for namespace paths (e.g., "parent.child")
 )
 
 // DefaultEnabled defines the default logging state (disabled).
@@ -34,6 +35,7 @@ const (
 	LevelInfo                   // Info level for general operational messages
 	LevelWarn                   // Warn level for warning conditions
 	LevelError                  // Error level for error conditions requiring attention
+	LevelNone                   // Error level for error conditions requiring attention
 )
 
 // Namespace style constants.
@@ -66,6 +68,8 @@ func (l LevelType) String() string {
 		return "WARN"
 	case LevelError:
 		return "ERROR"
+	case LevelNone:
+		return "NONE"
 	default:
 		return "UNKNOWN"
 	}

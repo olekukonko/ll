@@ -1,10 +1,15 @@
 package ll
 
 import (
+	"bufio"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
+	"math"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -534,7 +539,9 @@ func (l *Logger) Print(args ...any) {
 		}
 		builder.WriteString(fmt.Sprint(arg))
 	}
-	l.log(lx.LevelInfo, builder.String(), nil, false)
+
+	builder.WriteString(lx.Newline)
+	l.log(lx.LevelNone, builder.String(), nil, false)
 }
 
 // Info logs a message at Info level.
@@ -735,6 +742,129 @@ func (l *Logger) Panic(args ...any) {
 	panic(msg)
 }
 
+// Dbg logs debug information including the source file, line number, and expression value.
+// It captures the calling line of code and displays both the expression and its value.
+// Useful for debugging without adding temporary print statements.
+// Example:
+//
+//	x := 42
+//	logger.Dbg(x) // Output: [file.go:123] x = 42
+func (l *Logger) Dbg(values ...interface{}) {
+	l.dbg(2, values...)
+}
+
+func (l *Logger) dbg(skip int, values ...interface{}) {
+	for _, exp := range values {
+		_, file, line, ok := runtime.Caller(skip)
+		if !ok {
+			l.log(lx.LevelError, "Dbg: Unable to parse runtime caller", nil, false)
+			return
+		}
+
+		f, err := os.Open(file)
+		if err != nil {
+			l.log(lx.LevelError, "Dbg: Unable to open expected file", nil, false)
+			return
+		}
+
+		scanner := bufio.NewScanner(f)
+		scanner.Split(bufio.ScanLines)
+		var out string
+		i := 1
+		for scanner.Scan() {
+			if i == line {
+				v := scanner.Text()[strings.Index(scanner.Text(), "(")+1 : len(scanner.Text())-strings.Index(reverseString(scanner.Text()), ")")-1]
+				out = fmt.Sprintf("[%s:%d] %s = %+v", file[len(file)-strings.Index(reverseString(file), "/"):], line, v, exp)
+				break
+			}
+			i++
+		}
+		if err := scanner.Err(); err != nil {
+			l.log(lx.LevelError, err.Error(), nil, false)
+			return
+		}
+		switch exp.(type) {
+		case error:
+			l.log(lx.LevelError, out, nil, false)
+		default:
+			l.log(lx.LevelInfo, out, nil, false)
+		}
+
+		f.Close()
+	}
+}
+
+// Dump displays a hex and ASCII representation of any value's binary form.
+// It serializes the value using gob encoding and shows a hex/ASCII dump similar to hexdump -C.
+// Useful for inspecting binary data structures.
+// Example:
+//
+//	type Data struct { X int; Y string }
+//	logger.Dump(Data{42, "test"})
+func (l *Logger) Dump(values ...interface{}) {
+	// Convert any value to bytes
+	for _, value := range values {
+		l.Info("Dumping %v (%T)", value, value)
+
+		var by []byte
+		var err error
+
+		switch v := value.(type) {
+		case []byte:
+			by = v
+		case string:
+			by = []byte(v)
+		case float32:
+			buf := make([]byte, 4)
+			binary.BigEndian.PutUint32(buf, math.Float32bits(v))
+			by = buf
+		case float64:
+			buf := make([]byte, 8)
+			binary.BigEndian.PutUint64(buf, math.Float64bits(v))
+			by = buf
+		case int, int8, int16, int32, int64:
+			by = make([]byte, 8)
+			binary.BigEndian.PutUint64(by, uint64(reflect.ValueOf(v).Int()))
+		case uint, uint8, uint16, uint32, uint64:
+			by = make([]byte, 8)
+			binary.BigEndian.PutUint64(by, reflect.ValueOf(v).Uint())
+		default:
+			by, err = json.Marshal(v) // Fallback to JSON
+		}
+
+		if err != nil {
+			l.Error("Dump error: %v", err)
+			continue
+		}
+
+		// Now dump the bytes as before
+		n := len(by)
+		rowcount := 0
+		stop := (n / 8) * 8
+		k := 0
+		s := strings.Builder{}
+		for i := 0; i <= stop; i += 8 {
+			k++
+			if i+8 < n {
+				rowcount = 8
+			} else {
+				rowcount = min(k*8, n) % 8
+			}
+			s.WriteString(fmt.Sprintf("pos %02d  hex:  ", i))
+
+			for j := 0; j < rowcount; j++ {
+				s.WriteString(fmt.Sprintf("%02x  ", by[i+j]))
+			}
+			for j := rowcount; j < 8; j++ {
+				s.WriteString(fmt.Sprintf("    "))
+			}
+			s.WriteString(fmt.Sprintf("  '%s'\n", viewString(by[i:(i+rowcount)])))
+
+		}
+		l.log(lx.LevelNone, s.String(), nil, false)
+	}
+}
+
 // log is the internal method for processing a log entry.
 // It applies rate limiting, sampling, middleware, and context before passing to the handler.
 // If a middleware returns a non-nil error, the log is stopped, ensuring precise control.
@@ -905,4 +1035,22 @@ func WithStyle(style lx.StyleType) Option {
 	return func(l *Logger) {
 		l.style = style
 	}
+}
+
+func reverseString(s string) string {
+	r := []rune(s)
+	for i, j := 0, len(r)-1; i < len(r)/2; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
+}
+
+func viewString(b []byte) string {
+	r := []rune(string(b))
+	for i := range r {
+		if r[i] < 32 || r[i] > 126 {
+			r[i] = '.'
+		}
+	}
+	return string(r)
 }

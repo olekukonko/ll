@@ -145,6 +145,62 @@ logger.Handler(lh.NewJSONHandler(os.Stdout, time.RFC3339Nano))
 logger.Info("JSON log") // Output: {"timestamp":"...","level":"INFO","message":"JSON log","namespace":"app"}
 ```
 
+
+Here's a clear, well-structured documentation section for the debugging features that matches your package's context:
+
+---
+
+### 6. Debugging Tools
+
+The `ll` package provides specialized debugging utilities that go beyond standard logging:
+
+#### Core Debugging Methods
+
+1. **`Dbg()` - Contextual Inspection**
+```go
+x := 42
+user := struct{ Name string }{"Alice"}
+
+ll.Dbg(x)    // [file.go:123] x = 42
+ll.Dbg(user) // [file.go:124] user = {Name:Alice}
+```
+- Shows file/line context
+- Preserves variable names
+- Handles all Go types
+
+2. **`Dump()` - Binary Inspection**
+```go
+data := []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f}
+ll.Dump(data) 
+
+// Output:
+// pos 00  hex:  48 65 6c 6c 6f     'Hello'
+```
+- Hex/ASCII view like `hexdump -C`
+- Optimized for strings/bytes
+- Fallback to JSON for complex types
+
+#### Advanced Features
+
+3. **Performance Tracking**
+```go
+defer ll.Measure("database query")() // Logs duration on return
+
+// Or explicitly:
+start := ll.Now()
+ll.Benchmark(start, "operation") // Logs elapsed time
+```
+
+##### Performance Notes
+
+- `Dbg()` calls are compile-time disabled when not enabled
+- `Dump()` has optimized paths for:
+    - Primitive types (direct binary encoding)
+    - Strings/bytes (zero-copy)
+    - Structs (JSON fallback)
+
+
+
 ## Real-world Use Case
 
 Here’s a practical example of using `ll` in a web server:

@@ -1,7 +1,9 @@
 package ll
 
 import (
+	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
+	"os"
 	"sync/atomic"
 	"time"
 )
@@ -16,7 +18,7 @@ var defaultLogger = &Logger{
 	namespaces:      defaultStore,                 // Shared namespace store for enable/disable states
 	context:         make(map[string]interface{}), // Empty context for global fields
 	style:           lx.FlatPath,                  // Flat namespace style (e.g., [parent/child])
-	handler:         nil,                          // No default handler (must be set)
+	handler:         lh.NewTextHandler(os.Stdout), // No default handler (must be set)
 	middleware:      make([]Middleware, 0),        // Empty middleware chain
 	stackBufferSize: 4096,                         // Buffer size for stack traces
 }
@@ -244,6 +246,22 @@ func Disable() *Logger {
 	return defaultLogger.Disable()
 }
 
+// Dbg logs debug information including the source file, line number, and expression value.
+// It captures the calling line of code and displays both the expression and its value.
+// Useful for debugging without adding temporary print statements.
+func Dbg(any ...interface{}) {
+	defaultLogger.dbg(2, any...)
+}
+
+// Dump displays a hex and ASCII representation of any value's binary form.
+// It serializes the value using gob encoding and shows a hex/ASCII dump similar to hexdump -C.
+// Useful for inspecting binary data structures.
+func Dump(any interface{}) {
+	defaultLogger.Dump(any)
+}
+
+// Enabled returns whether the logger is enabled for logging.
+// It provides thread-safe read access to the enabled field using a read lock.
 func Enabled() bool {
 	return defaultLogger.Enabled()
 }

@@ -18,8 +18,22 @@ func NewColorizedHandler(w io.Writer) *ColorizedHandler {
 	return &ColorizedHandler{w: w}
 }
 
+// isDumpOutput detects if the message contains dump formatting
+func isDumpOutput(msg string) bool {
+	return strings.Contains(msg, "pos ") && strings.Contains(msg, "hex:")
+}
+
 // Handle processes a log entry and writes it with ANSI color codes.
 func (h *ColorizedHandler) Handle(e *lx.Entry) error {
+	// Special handling for dump output
+	if isDumpOutput(e.Message) {
+		return h.handleDumpOutput(e)
+	}
+	return h.handleRegularOutput(e)
+}
+
+// handleRegularOutput handles normal log entries
+func (h *ColorizedHandler) handleRegularOutput(e *lx.Entry) error {
 	var builder strings.Builder
 
 	// Namespace formatting
@@ -85,9 +99,64 @@ func (h *ColorizedHandler) Handle(e *lx.Entry) error {
 	}
 
 	// Newline
-	builder.WriteString("\n")
+	if e.Level != lx.LevelNone {
+		builder.WriteString(lx.Newline)
+	}
 
 	// Write to output
+	_, err := h.w.Write([]byte(builder.String()))
+	return err
+}
+
+// ColorizedHandler's handleDumpOutput (clean version)
+func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
+	lines := strings.Split(e.Message, "\n")
+	var builder strings.Builder
+
+	// Color scheme remains unchanged
+	posColor := "\033[38;5;117m"
+	hexColor := "\033[38;5;156m"
+	asciiColor := "\033[38;5;224m"
+	reset := "\033[0m"
+
+	builder.WriteString("---- BEGIN DUMP ----\n")
+	total := len(lines)
+	for i, line := range lines {
+		if strings.HasPrefix(line, "pos ") {
+			parts := strings.SplitN(line, "hex:", 2)
+			if len(parts) != 2 {
+				continue
+			}
+
+			builder.WriteString(posColor)
+			builder.WriteString(parts[0])
+			builder.WriteString(reset)
+
+			hexAscii := strings.SplitN(parts[1], "'", 2)
+			builder.WriteString(hexColor)
+			builder.WriteString("hex:")
+			builder.WriteString(hexAscii[0])
+			builder.WriteString(reset)
+
+			if len(hexAscii) > 1 {
+				builder.WriteString(asciiColor)
+				builder.WriteString("'")
+				builder.WriteString(hexAscii[1])
+				builder.WriteString(reset)
+			}
+		} else if strings.HasPrefix(line, "Dumping value of type:") {
+			builder.WriteString("\033[1;35m")
+			builder.WriteString(line)
+			builder.WriteString(reset)
+		} else {
+			builder.WriteString(line)
+		}
+
+		if i < total-1 {
+			builder.WriteString(lx.Newline)
+		}
+	}
+	builder.WriteString("---- END DUMP ----\n")
 	_, err := h.w.Write([]byte(builder.String()))
 	return err
 }
