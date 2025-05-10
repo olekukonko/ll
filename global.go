@@ -13,7 +13,7 @@ import (
 // a logger instance. The logger is initialized with default settings: disabled, Debug level,
 // flat namespace style, and no handler. It is thread-safe due to the Logger struct’s mutex.
 var defaultLogger = &Logger{
-	enabled:         lx.DefaultEnabled,            // Initially disabled (lx.DefaultEnabled = false)
+	enabled:         true,                         // Initially disabled (lx.DefaultEnabled = false)
 	level:           lx.LevelDebug,                // Minimum log level set to Debug
 	namespaces:      defaultStore,                 // Shared namespace store for enable/disable states
 	context:         make(map[string]interface{}), // Empty context for global fields
