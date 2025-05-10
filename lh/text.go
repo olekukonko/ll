@@ -21,7 +21,7 @@ func NewTextHandler(w io.Writer) *TextHandler {
 // Handle processes a log entry and writes it as plain text.
 func (h *TextHandler) Handle(e *lx.Entry) error {
 	// Special handling for dump output
-	if isDumpOutput(e.Message) {
+	if e.Class == lx.ClassDump {
 		return h.handleDumpOutput(e)
 	}
 	return h.handleRegularOutput(e)

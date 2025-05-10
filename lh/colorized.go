@@ -18,15 +18,10 @@ func NewColorizedHandler(w io.Writer) *ColorizedHandler {
 	return &ColorizedHandler{w: w}
 }
 
-// isDumpOutput detects if the message contains dump formatting
-func isDumpOutput(msg string) bool {
-	return strings.Contains(msg, "pos ") && strings.Contains(msg, "hex:")
-}
-
 // Handle processes a log entry and writes it with ANSI color codes.
 func (h *ColorizedHandler) Handle(e *lx.Entry) error {
 	// Special handling for dump output
-	if isDumpOutput(e.Message) {
+	if e.Class == lx.ClassDump {
 		return h.handleDumpOutput(e)
 	}
 	return h.handleRegularOutput(e)

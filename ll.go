@@ -541,7 +541,7 @@ func (l *Logger) Print(args ...any) {
 	}
 
 	builder.WriteString(lx.Newline)
-	l.log(lx.LevelNone, builder.String(), nil, false)
+	l.log(lx.LevelNone, lx.ClassText, builder.String(), nil, false)
 }
 
 // Info logs a message at Info level.
@@ -553,7 +553,7 @@ func (l *Logger) Print(args ...any) {
 //	logger.Info("Started") // Output: [app]: INFO: Started
 func (l *Logger) Info(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.log(lx.LevelInfo, msg, nil, false)
+	l.log(lx.LevelInfo, lx.ClassText, msg, nil, false)
 }
 
 // Measure is a benchmarking helper that measures and returns the duration of a function’s execution.
@@ -595,7 +595,7 @@ func (l *Logger) Benchmark(start time.Time) time.Duration {
 //	logger.Debug("Debugging") // Output: [app] DEBUG: Debugging
 func (l *Logger) Debug(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.log(lx.LevelDebug, msg, nil, false)
+	l.log(lx.LevelDebug, lx.ClassText, msg, nil, false)
 }
 
 // Warn logs a message at Warn level.
@@ -606,7 +606,7 @@ func (l *Logger) Debug(format string, args ...any) {
 //	logger.Warn("Warning") // Output: [app] WARN: Warning
 func (l *Logger) Warn(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.log(lx.LevelWarn, msg, nil, false)
+	l.log(lx.LevelWarn, lx.ClassText, msg, nil, false)
 }
 
 // Error logs a message at Error level.
@@ -617,7 +617,7 @@ func (l *Logger) Warn(format string, args ...any) {
 //	logger.Error("Error occurred") // Output: [app] ERROR: Error occurred
 func (l *Logger) Error(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.log(lx.LevelError, msg, nil, false)
+	l.log(lx.LevelError, lx.ClassText, msg, nil, false)
 }
 
 // GetHandler returns the logger's current handler implementation.
@@ -678,7 +678,7 @@ func (l *Logger) Err(errs ...error) *Logger {
 			l.context["error"] = nonNilErrors
 		}
 		// Log concatenated error messages at Error level
-		l.log(lx.LevelError, builder.String(), nil, false)
+		l.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
 	}
 	l.mu.Unlock()
 
@@ -695,7 +695,7 @@ func (l *Logger) Err(errs ...error) *Logger {
 //	logger.Stack("Critical error") // Output: [app] ERROR: Critical error [stack=...]
 func (l *Logger) Stack(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.log(lx.LevelError, msg, nil, true)
+	l.log(lx.LevelError, lx.ClassStack, msg, nil, true)
 }
 
 // Len counts the total number of values sent to handler
@@ -718,7 +718,7 @@ func (l *Logger) Fatal(args ...any) {
 		}
 		builder.WriteString(fmt.Sprint(arg))
 	}
-	l.log(lx.LevelError, builder.String(), nil, true)
+	l.log(lx.LevelError, lx.ClassText, builder.String(), nil, true)
 	os.Exit(1)
 }
 
@@ -738,7 +738,7 @@ func (l *Logger) Panic(args ...any) {
 		builder.WriteString(fmt.Sprint(arg))
 	}
 	msg := builder.String()
-	l.log(lx.LevelError, msg, nil, true)
+	l.log(lx.LevelError, lx.ClassText, msg, nil, true)
 	panic(msg)
 }
 
@@ -757,13 +757,13 @@ func (l *Logger) dbg(skip int, values ...interface{}) {
 	for _, exp := range values {
 		_, file, line, ok := runtime.Caller(skip)
 		if !ok {
-			l.log(lx.LevelError, "Dbg: Unable to parse runtime caller", nil, false)
+			l.log(lx.LevelError, lx.ClassText, "Dbg: Unable to parse runtime caller", nil, false)
 			return
 		}
 
 		f, err := os.Open(file)
 		if err != nil {
-			l.log(lx.LevelError, "Dbg: Unable to open expected file", nil, false)
+			l.log(lx.LevelError, lx.ClassText, "Dbg: Unable to open expected file", nil, false)
 			return
 		}
 
@@ -780,14 +780,14 @@ func (l *Logger) dbg(skip int, values ...interface{}) {
 			i++
 		}
 		if err := scanner.Err(); err != nil {
-			l.log(lx.LevelError, err.Error(), nil, false)
+			l.log(lx.LevelError, lx.ClassText, err.Error(), nil, false)
 			return
 		}
 		switch exp.(type) {
 		case error:
-			l.log(lx.LevelError, out, nil, false)
+			l.log(lx.LevelError, lx.ClassText, out, nil, false)
 		default:
-			l.log(lx.LevelInfo, out, nil, false)
+			l.log(lx.LevelInfo, lx.ClassText, out, nil, false)
 		}
 
 		f.Close()
@@ -861,7 +861,7 @@ func (l *Logger) Dump(values ...interface{}) {
 			s.WriteString(fmt.Sprintf("  '%s'\n", viewString(by[i:(i+rowcount)])))
 
 		}
-		l.log(lx.LevelNone, s.String(), nil, false)
+		l.log(lx.LevelNone, lx.ClassDump, s.String(), nil, false)
 	}
 }
 
@@ -873,7 +873,7 @@ func (l *Logger) Dump(values ...interface{}) {
 //
 //	logger := New("app").Enable()
 //	logger.Info("Test") // Calls log(lx.LevelInfo, "Test", nil, false)
-func (l *Logger) log(level lx.LevelType, msg string, fields map[string]interface{}, withStack bool) {
+func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields map[string]interface{}, withStack bool) {
 	// Check if the log should be emitted
 	if !l.shouldLog(level) {
 		return
@@ -913,6 +913,7 @@ func (l *Logger) log(level lx.LevelType, msg string, fields map[string]interface
 		Namespace: l.currentPath,
 		Fields:    fields,
 		Style:     l.style,
+		Class:     class,
 	}
 
 	// Add context fields, avoiding overwrites

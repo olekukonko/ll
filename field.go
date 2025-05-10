@@ -49,7 +49,7 @@ func (fb *FieldBuilder) Info(format string, args ...any) {
 	// Format the message using the provided arguments
 	msg := fmt.Sprintf(format, args...)
 	// Log at Info level with the builder’s fields, no stack trace
-	fb.logger.log(lx.LevelInfo, msg, fb.fields, false)
+	fb.logger.log(lx.LevelInfo, lx.ClassText, msg, fb.fields, false)
 }
 
 // Debug logs a message at Debug level with the builder’s fields.
@@ -64,7 +64,7 @@ func (fb *FieldBuilder) Debug(format string, args ...any) {
 	// Format the message
 	msg := fmt.Sprintf(format, args...)
 	// Log at Debug level with the builder’s fields, no stack trace
-	fb.logger.log(lx.LevelDebug, msg, fb.fields, false)
+	fb.logger.log(lx.LevelDebug, lx.ClassText, msg, fb.fields, false)
 }
 
 // Warn logs a message at Warn level with the builder’s fields.
@@ -78,7 +78,7 @@ func (fb *FieldBuilder) Warn(format string, args ...any) {
 	// Format the message
 	msg := fmt.Sprintf(format, args...)
 	// Log at Warn level with the builder’s fields, no stack trace
-	fb.logger.log(lx.LevelWarn, msg, fb.fields, false)
+	fb.logger.log(lx.LevelWarn, lx.ClassText, msg, fb.fields, false)
 }
 
 // Error logs a message at Error level with the builder’s fields.
@@ -92,7 +92,7 @@ func (fb *FieldBuilder) Error(format string, args ...any) {
 	// Format the message
 	msg := fmt.Sprintf(format, args...)
 	// Log at Error level with the builder’s fields, no stack trace
-	fb.logger.log(lx.LevelError, msg, fb.fields, false)
+	fb.logger.log(lx.LevelError, lx.ClassText, msg, fb.fields, false)
 }
 
 // Stack logs a message at Error level with a stack trace and the builder’s fields.
@@ -106,7 +106,7 @@ func (fb *FieldBuilder) Stack(format string, args ...any) {
 	// Format the message
 	msg := fmt.Sprintf(format, args...)
 	// Log at Error level with the builder’s fields and a stack trace
-	fb.logger.log(lx.LevelError, msg, fb.fields, true)
+	fb.logger.log(lx.LevelError, lx.ClassStack, msg, fb.fields, true)
 }
 
 // Fatal logs a message at Error level with a stack trace and the builder’s fields, then exits.
@@ -127,7 +127,7 @@ func (fb *FieldBuilder) Fatal(args ...any) {
 		builder.WriteString(fmt.Sprint(arg))
 	}
 	// Log at Error level with the builder’s fields and a stack trace
-	fb.logger.log(lx.LevelError, builder.String(), fb.fields, true)
+	fb.logger.log(lx.LevelError, lx.ClassText, builder.String(), fb.fields, true)
 	// Exit the program with status code 1
 	os.Exit(1)
 }
@@ -151,7 +151,7 @@ func (fb *FieldBuilder) Panic(args ...any) {
 	}
 	msg := builder.String()
 	// Log at Error level with the builder’s fields and a stack trace
-	fb.logger.log(lx.LevelError, msg, fb.fields, true)
+	fb.logger.log(lx.LevelError, lx.ClassText, msg, fb.fields, true)
 	// Trigger a panic with the formatted message
 	panic(msg)
 }
@@ -200,7 +200,7 @@ func (fb *FieldBuilder) Err(errs ...error) *FieldBuilder {
 			fb.fields["error"] = nonNilErrors
 		}
 		// Log concatenated error messages at Error level
-		fb.logger.log(lx.LevelError, builder.String(), nil, false)
+		fb.logger.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
 	}
 
 	// Return FieldBuilder for chaining

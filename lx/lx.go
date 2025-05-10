@@ -38,6 +38,15 @@ const (
 	LevelNone                   // Error level for error conditions requiring attention
 )
 
+const (
+	ClassText ClassType = iota
+	ClassJSON
+	ClassDump
+	ClassSpecial
+	ClassRaw
+	ClassStack
+)
+
 // Namespace style constants.
 // These constants define how namespace paths are formatted in log output, affecting the
 // visual representation of hierarchical namespaces.
@@ -93,7 +102,8 @@ type Entry struct {
 	Fields    map[string]interface{} // Additional key-value metadata (e.g., {"user": "alice"})
 	Style     StyleType              // Namespace formatting style (FlatPath or NestedPath)
 	Error     error                  // Associated error, if any (e.g., for error logs)
-	Id        int                    `json:"-"` // Unique ID for the entry, ignored in JSON output
+	Class     ClassType
+	Id        int `json:"-"` // Unique ID for the entry, ignored in JSON output
 }
 
 // Handler defines the interface for processing log entries.
@@ -109,4 +119,26 @@ type Entry struct {
 //	}
 type Handler interface {
 	Handle(e *Entry) error // Processes a log entry, returning any error
+}
+
+type ClassType int
+
+func (t ClassType) String() string {
+	switch t {
+	case ClassText:
+		return "TEST"
+	case ClassJSON:
+		return "JSON"
+	case ClassDump:
+		return "DUMP"
+	case ClassSpecial:
+		return "SPECIAL"
+	case ClassRaw:
+		return "RAW"
+	case ClassStack:
+		return "STACK"
+	default:
+		return "UNKNOWN"
+
+	}
 }

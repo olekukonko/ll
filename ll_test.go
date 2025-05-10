@@ -178,24 +178,25 @@ func TestHandlers(t *testing.T) {
 	// Test JSONHandler for structured JSON output
 	t.Run("JSONHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		logger := New("test").Enable().Handler(lh.NewJSONHandler(buf, ""))
+		logger := New("test").Enable().Handler(lh.NewJSONHandler(buf))
 		logger.Fields("key", "value").Info("Test JSON")
 		// Parse JSON output and verify fields
-		var data map[string]interface{}
+		var data lh.JsonOutput
 		if err := json.Unmarshal(buf.Bytes(), &data); err != nil {
 			t.Errorf("Expected no error, got %v", err)
 		}
-		if data["level"] != "INFO" {
-			t.Errorf("Expected level=%q, got %q", "INFO", data["level"])
+		if data.Level != lx.LevelInfo.String() {
+			t.Errorf("Expected level=%q, got %q", "INFO", data.Level)
 		}
-		if data["message"] != "Test JSON" {
-			t.Errorf("Expected message=%q, got %q", "Test JSON", data["message"])
+		if data.Msg != "Test JSON" {
+			t.Errorf("Expected message=%q, got %q", "Test JSON", data.Msg)
 		}
-		if data["namespace"] != "test" {
-			t.Errorf("Expected namespace=%q, got %q", "test", data["namespace"])
+		if data.Namespace != "test" {
+			t.Errorf("Expected namespace=%q, got %q", "test", data.Namespace)
 		}
-		if data["key"] != "value" {
-			t.Errorf("Expected key=%q, got %q", "value", data["key"])
+		f := data.Fields
+		if f["key"] != "value" {
+			t.Errorf("Expected key=%q, got %q", "value", f["key"])
 		}
 	})
 
@@ -225,7 +226,7 @@ func TestHandlers(t *testing.T) {
 		buf2 := &bytes.Buffer{}
 		logger := New("test").Enable().Handler(lh.NewMultiHandler(
 			lh.NewTextHandler(buf1),
-			lh.NewJSONHandler(buf2, ""),
+			lh.NewJSONHandler(buf2),
 		))
 		logger.Fields("key", "value").Info("Test multi")
 		// Verify TextHandler output
@@ -237,8 +238,8 @@ func TestHandlers(t *testing.T) {
 		if err := json.Unmarshal(buf2.Bytes(), &data); err != nil {
 			t.Errorf("Expected no error, got %v", err)
 		}
-		if data["message"] != "Test multi" {
-			t.Errorf("Expected message=%q, got %q", "Test multi", data["message"])
+		if data["msg"] != "Test multi" {
+			t.Errorf("Expected message=%q, got %q", "Test multi", data["msg"])
 		}
 	})
 }
