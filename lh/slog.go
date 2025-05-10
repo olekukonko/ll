@@ -4,12 +4,11 @@ import (
 	"context"
 	"github.com/olekukonko/ll/lx"
 	"log/slog"
-	"time"
 )
 
-// SlogHandler adapts the standard library’s slog.Handler for compatibility with this package.
+// SlogHandler adapts a slog.Handler to implement lx.Handler.
 type SlogHandler struct {
-	slogHandler slog.Handler // Underlying slog handler
+	slogHandler slog.Handler
 }
 
 // NewSlogHandler creates a new SlogHandler wrapping the provided slog.Handler.
@@ -17,23 +16,51 @@ func NewSlogHandler(h slog.Handler) *SlogHandler {
 	return &SlogHandler{slogHandler: h}
 }
 
-// Handle implements the Handler interface, converting the log entry to an slog.Record.
-// It maps entry fields to slog attributes and delegates to the underlying slog.Handler.
+// Handle converts an lx.Entry to slog.Record and delegates to the slog.Handler.
 func (h *SlogHandler) Handle(e *lx.Entry) error {
-	// Create attributes for standard fields
-	attrs := make([]slog.Attr, 0, len(e.Fields)+3)
-	attrs = append(attrs,
-		slog.String("timestamp", e.Timestamp.Format(time.RFC3339Nano)),
-		slog.String("level", e.Level.String()),
-		slog.String("namespace", e.Namespace),
+	// Convert lx.LevelType to slog.Level
+	level := toSlogLevel(e.Level)
+
+	// Create a slog.Record with the entry's data
+	record := slog.NewRecord(
+		e.Timestamp, // time.Time
+		level,       // slog.Level
+		e.Message,   // string
+		0,           // pc (program counter, optional)
 	)
-	// Add custom fields as attributes
-	for k, v := range e.Fields {
-		attrs = append(attrs, slog.Any(k, v))
+
+	// Add standard fields as attributes
+	record.AddAttrs(
+		slog.String("namespace", e.Namespace),
+		slog.String("class", e.Class.String()),
+	)
+
+	// Add stack trace if present
+	if len(e.Stack) > 0 {
+		record.AddAttrs(slog.String("stack", string(e.Stack)))
 	}
-	// Create an slog.Record with the entry’s timestamp, level, and message
-	record := slog.NewRecord(e.Timestamp, slog.Level(e.Level), e.Message, 0)
-	record.AddAttrs(attrs...)
-	// Delegate to the underlying slog.Handler
+
+	// Add custom fields
+	for k, v := range e.Fields {
+		record.AddAttrs(slog.Any(k, v))
+	}
+
+	// Handle the record with the underlying slog.Handler
 	return h.slogHandler.Handle(context.Background(), record)
+}
+
+// toSlogLevel converts lx.LevelType to slog.Level.
+func toSlogLevel(level lx.LevelType) slog.Level {
+	switch level {
+	case lx.LevelDebug:
+		return slog.LevelDebug
+	case lx.LevelInfo:
+		return slog.LevelInfo
+	case lx.LevelWarn:
+		return slog.LevelWarn
+	case lx.LevelError:
+		return slog.LevelError
+	default:
+		return slog.LevelInfo // Default for unknown levels
+	}
 }
