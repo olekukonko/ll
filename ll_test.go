@@ -609,7 +609,7 @@ func TestHandlerErrors(t *testing.T) {
 // TestNamespaceToggle verifies the NamespaceEnable and NamespaceDisable methods.
 func TestNamespaceToggle(t *testing.T) {
 	// Create a logger and test namespace toggling
-	logger := New("test")
+	logger := New("test").Disable()
 	logger = logger.NamespaceEnable("parent/child")
 	if !logger.NamespaceEnabled("parent/child") {
 		t.Error("parent/child should be enabled")

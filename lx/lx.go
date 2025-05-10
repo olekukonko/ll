@@ -24,7 +24,7 @@ const (
 // It specifies whether logging is enabled by default for new Logger instances in the ll package.
 // Set to false to prevent logging until explicitly enabled.
 const (
-	DefaultEnabled = false // Default state for new loggers (disabled)
+	DefaultEnabled = true // Default state for new loggers (disabled)
 )
 
 // Log level constants, ordered by increasing severity.
