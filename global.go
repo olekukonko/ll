@@ -215,3 +215,35 @@ func Shutdown() {
 func Active() bool {
 	return atomic.LoadInt32(&systemActive) == 1
 }
+
+// Fatal logs a message at Error level with a stack trace and exits the program.
+// It constructs the message from variadic arguments, logs it with a stack trace, and
+// terminates with exit code 1. Thread-safe.
+func Fatal(args ...any) {
+	defaultLogger.Fatal(args...)
+}
+
+// Panic logs a message at Error level with a stack trace and panics.
+// It constructs the message from variadic arguments, logs it with a stack trace, and
+// triggers a panic. Thread-safe.
+func Panic(args ...any) {
+	defaultLogger.Panic()
+}
+
+// Enable activates logging for the current logger.
+// It allows logs to be emitted if other conditions (level, namespace) are met.
+// Thread-safe with write lock. Returns the logger for method chaining.
+func Enable() *Logger {
+	return defaultLogger.Enable()
+}
+
+// Disable deactivates logging for the current logger.
+// It suppresses all logs, regardless of level or namespace. Thread-safe with write lock.
+// Returns the logger for method chaining.
+func Disable() *Logger {
+	return defaultLogger.Disable()
+}
+
+func Enabled() bool {
+	return defaultLogger.Enabled()
+}
