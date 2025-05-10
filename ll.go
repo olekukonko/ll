@@ -541,7 +541,7 @@ func (l *Logger) Print(args ...any) {
 	}
 
 	builder.WriteString(lx.Newline)
-	l.log(lx.LevelNone, lx.ClassText, builder.String(), nil, false)
+	l.log(lx.LevelNone, lx.ClassRaw, builder.String(), nil, false)
 }
 
 // Info logs a message at Info level.

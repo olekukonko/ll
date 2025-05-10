@@ -24,6 +24,12 @@ func (h *TextHandler) Handle(e *lx.Entry) error {
 	if e.Class == lx.ClassDump {
 		return h.handleDumpOutput(e)
 	}
+
+	if e.Class == lx.ClassRaw {
+		_, err := h.w.Write([]byte(e.Message))
+		return err
+	}
+
 	return h.handleRegularOutput(e)
 }
 
