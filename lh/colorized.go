@@ -116,7 +116,7 @@ func (h *ColorizedHandler) handleRegularOutput(e *lx.Entry) error {
 	builder.WriteString(e.Message)
 	h.formatFields(&builder, e)
 
-	fmt.Println("------------>", len(e.Stack))
+	// fmt.Println("------------>", len(e.Stack))
 	// Stack trace if present
 	if len(e.Stack) > 0 {
 		h.formatStack(&builder, e.Stack)
