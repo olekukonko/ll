@@ -265,3 +265,18 @@ func Dump(any interface{}) {
 func Enabled() bool {
 	return defaultLogger.Enabled()
 }
+
+// Fields starts a fluent chain for adding fields using variadic key-value pairs.
+// It creates a FieldBuilder to attach fields, handling non-string keys or uneven pairs by
+// adding an error field. Thread-safe via the FieldBuilder’s logger.
+// Example:
+func Fields(pairs ...any) *FieldBuilder {
+	return defaultLogger.Fields(pairs...)
+}
+
+// Field starts a fluent chain for adding fields from a map.
+// It creates a FieldBuilder to attach fields from a map, supporting type-safe field addition.
+// Thread-safe via the FieldBuilder’s logger.
+func Field(fields map[string]interface{}) *FieldBuilder {
+	return defaultLogger.Field(fields)
+}
