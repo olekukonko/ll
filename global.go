@@ -79,6 +79,13 @@ func NamespaceDisable(path string) *Logger {
 	return defaultLogger.NamespaceDisable(path)
 }
 
+// Namespace creates a child logger with a sub-namespace appended to the current path.
+// The child inherits the parent’s configuration but has an independent context.
+// Thread-safe with read lock. Returns the new logger for further configuration or logging.
+func Namespace(name string) *Logger {
+	return defaultLogger.Namespace(name)
+}
+
 // Info logs a message at Info level using the default logger.
 // It formats the message using the provided format string and arguments, then delegates to
 // defaultLogger’s Info method. The log is processed through the logger’s middleware pipeline,
