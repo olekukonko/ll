@@ -1,8 +1,9 @@
 // ll_ns_test.go
-package ll
+package tests
 
 import (
 	"bytes"
+	"github.com/olekukonko/ll"
 	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // enables logging for that namespace and its descendants, even if the logger is initially disabled.
 func TestNamespaceEnableWithCustomSeparator(t *testing.T) {
 	buf := &bytes.Buffer{}
-	logger := New("base").Disable().Separator(lx.Dot).Handler(lh.NewTextHandler(buf))
+	logger := ll.New("base").Disable().Separator(lx.Dot).Handler(lh.NewTextHandler(buf))
 
 	// Child loggers inherit disabled state
 	a := logger.Namespace("a").Handler(lh.NewTextHandler(buf))       // base.a
@@ -66,7 +67,7 @@ func TestNamespaceEnableWithCustomSeparator(t *testing.T) {
 // TestNamespaces verifies namespace creation, logging styles, and enable/disable behavior.
 func TestNamespaces(t *testing.T) {
 	buf := &bytes.Buffer{}
-	logger := New("parent").Enable().Handler(lh.NewTextHandler(buf)) // Default "/" separator
+	logger := ll.New("parent").Enable().Handler(lh.NewTextHandler(buf)) // Default "/" separator
 
 	// Child logger inherits enabled state
 	child := logger.Namespace("child").Handler(lh.NewTextHandler(buf))
@@ -96,7 +97,7 @@ func TestNamespaces(t *testing.T) {
 		t.Errorf("Expected namespace 'child' (parent/child) to be disabled")
 	}
 	if child.NamespaceEnabled("") {
-		t.Errorf("Expected namespace %q to be disabled", child.currentPath)
+		t.Errorf("Expected namespace %q to be disabled", child.GetPath())
 	}
 
 	buf.Reset()
@@ -111,7 +112,7 @@ func TestNamespaces(t *testing.T) {
 		t.Errorf("Expected namespace 'child' (parent/child) to be enabled")
 	}
 	if !child.NamespaceEnabled("") {
-		t.Errorf("Expected namespace %q to be enabled", child.currentPath)
+		t.Errorf("Expected namespace %q to be enabled", child.GetPath())
 	}
 
 	buf.Reset()
@@ -123,14 +124,14 @@ func TestNamespaces(t *testing.T) {
 }
 
 // expectedNestedLogPrefix generates the expected log prefix for nested path style.
-func expectedNestedLogPrefix(l *Logger, arrow string) string {
-	separator := l.separator
+func expectedNestedLogPrefix(l *ll.Logger, arrow string) string {
+	separator := l.GetSeparator()
 	if separator == "" {
 		separator = lx.Slash
 	}
 
-	if l.currentPath != "" {
-		parts := strings.Split(l.currentPath, separator)
+	if l.GetPath() != "" {
+		parts := strings.Split(l.GetPath(), separator)
 		var builder strings.Builder
 		for i, part := range parts {
 			builder.WriteString(lx.LeftBracket)
@@ -150,7 +151,7 @@ func expectedNestedLogPrefix(l *Logger, arrow string) string {
 // TestSharedNamespaces verifies that namespace state affects derived loggers.
 func TestSharedNamespaces(t *testing.T) {
 	buf := &bytes.Buffer{}
-	parent := New("parent").Enable().Handler(lh.NewTextHandler(buf))
+	parent := ll.New("parent").Enable().Handler(lh.NewTextHandler(buf))
 
 	// Disable child namespace
 	parent.NamespaceDisable("child") // Sets parent/child to false
@@ -163,14 +164,14 @@ func TestSharedNamespaces(t *testing.T) {
 		t.Errorf("Expected namespace 'child' (parent/child) to be disabled")
 	}
 	if child.NamespaceEnabled("") {
-		t.Errorf("Expected namespace %q to be disabled", child.currentPath)
+		t.Errorf("Expected namespace %q to be disabled", child.GetPath())
 	}
 
 	// Test logging (should be blocked)
 	buf.Reset()
 	child.Info("Should not log from child")
 	if buf.String() != "" {
-		t.Errorf("Expected no output from %q, got %q", child.currentPath, buf.String())
+		t.Errorf("Expected no output from %q, got %q", child.GetPath(), buf.String())
 	}
 
 	// Enable child namespace
@@ -179,7 +180,7 @@ func TestSharedNamespaces(t *testing.T) {
 		t.Errorf("Expected namespace 'child' (parent/child) to be enabled")
 	}
 	if !child.NamespaceEnabled("") {
-		t.Errorf("Expected namespace %q to be enabled", child.currentPath)
+		t.Errorf("Expected namespace %q to be enabled", child.GetPath())
 	}
 
 	// Test logging (should appear)
@@ -193,7 +194,7 @@ func TestSharedNamespaces(t *testing.T) {
 
 // TestNamespaceHierarchicalOverride verifies hierarchical namespace rules with overrides.
 func TestNamespaceHierarchicalOverride(t *testing.T) {
-	l := New("base").Disable() // Default "/" separator, instance disabled
+	l := ll.New("base").Disable() // Default "/" separator, instance disabled
 
 	// Create buffers and loggers
 	bufC1 := &bytes.Buffer{}

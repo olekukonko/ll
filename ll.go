@@ -184,6 +184,24 @@ func (l *Logger) Enabled() bool {
 	return l.enabled
 }
 
+func (l *Logger) GetPath() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.currentPath
+}
+
+func (l *Logger) GetContext() map[string]interface{} {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.context
+}
+
+func (l *Logger) GetSeparator() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.separator
+}
+
 // GetLevel returns the minimum log level for the logger.
 // It provides thread-safe read access to the level field using a read lock.
 // Example:
@@ -198,6 +216,20 @@ func (l *Logger) GetLevel() lx.LevelType {
 	return l.level
 }
 
+// GetLevel returns the minimum log level for the logger.
+// It provides thread-safe read access to the level field using a read lock.
+// Example:
+//
+//	logger := New("app").Level(lx.LevelWarn)
+//	if logger.GetLevel() == lx.LevelWarn {
+//	    logger.Warn("Warning level set") // Output: [app] WARN: Warning level set
+//	}
+func (l *Logger) GetStyle() lx.StyleType {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.style
+}
+
 // Prefix sets a prefix to be prepended to all log messages of the current logger.
 // The prefix is applied before the message in the log output. Thread-safe with write lock.
 // Returns the logger for method chaining.
@@ -209,6 +241,9 @@ func (l *Logger) Prefix(prefix string) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.prefix = prefix
+
+	fmt.Println("=====>###", l.prefix)
+
 	return l
 }
 
@@ -561,6 +596,11 @@ func (l *Logger) CanLog(level lx.LevelType) bool {
 //	logger := New("app").Enable()
 //	logger.Print("message", "value") // Output: [app] INFO: message value
 func (l *Logger) Print(args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelInfo) {
+		return
+	}
+
 	var builder strings.Builder
 	for i, arg := range args {
 		if i > 0 {
@@ -581,6 +621,11 @@ func (l *Logger) Print(args ...any) {
 //	logger := New("app").Enable().Style(lx.NestedPath)
 //	logger.Info("Started") // Output: [app]: INFO: Started
 func (l *Logger) Info(format string, args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelInfo) {
+		return
+	}
+
 	msg := fmt.Sprintf(format, args...)
 	l.log(lx.LevelInfo, lx.ClassText, msg, nil, false)
 }
@@ -623,6 +668,10 @@ func (l *Logger) Benchmark(start time.Time) time.Duration {
 //	logger := New("app").Enable().Level(lx.LevelDebug)
 //	logger.Debug("Debugging") // Output: [app] DEBUG: Debugging
 func (l *Logger) Debug(format string, args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelDebug) {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	l.log(lx.LevelDebug, lx.ClassText, msg, nil, false)
 }
@@ -634,6 +683,10 @@ func (l *Logger) Debug(format string, args ...any) {
 //	logger := New("app").Enable()
 //	logger.Warn("Warning") // Output: [app] WARN: Warning
 func (l *Logger) Warn(format string, args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelWarn) {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	l.log(lx.LevelWarn, lx.ClassText, msg, nil, false)
 }
@@ -645,6 +698,10 @@ func (l *Logger) Warn(format string, args ...any) {
 //	logger := New("app").Enable()
 //	logger.Error("Error occurred") // Output: [app] ERROR: Error occurred
 func (l *Logger) Error(format string, args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelError) {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	l.log(lx.LevelError, lx.ClassText, msg, nil, false)
 }
@@ -675,7 +732,13 @@ func (l *Logger) GetHandler() lx.Handler {
 //	logger.Err(err1, err2).Info("Error occurred")
 //	// Output: [app] ERROR: failed 1; failed 2
 //	//         [app] INFO: Error occurred [error=[failed 1 failed 2]]
-func (l *Logger) Err(errs ...error) *Logger {
+func (l *Logger) Err(errs ...error) {
+
+	// fast check
+	if !l.shouldLog(lx.LevelError) {
+		return
+	}
+
 	l.mu.Lock()
 	// Initialize context if nil
 	if l.context == nil {
@@ -712,7 +775,7 @@ func (l *Logger) Err(errs ...error) *Logger {
 	l.mu.Unlock()
 
 	// Return Logger for chaining
-	return l
+	// return l
 }
 
 // Stack logs a message at Error level with a stack trace.
@@ -723,6 +786,10 @@ func (l *Logger) Err(errs ...error) *Logger {
 //	logger := New("app").Enable()
 //	logger.Stack("Critical error") // Output: [app] ERROR: Critical error [stack=...]
 func (l *Logger) Stack(format string, args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelDebug) {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	l.log(lx.LevelError, lx.ClassText, msg, nil, true)
 }
@@ -740,6 +807,12 @@ func (l *Logger) Len() int64 {
 //	logger := New("app").Enable()
 //	logger.Fatal("Fatal error") // Output: [app] ERROR: Fatal error [stack=...], then exits
 func (l *Logger) Fatal(args ...any) {
+	// fast check
+	if !l.shouldLog(lx.LevelError) {
+		// just exists
+		os.Exit(1)
+	}
+
 	var builder strings.Builder
 	for i, arg := range args {
 		if i > 0 {
@@ -759,6 +832,7 @@ func (l *Logger) Fatal(args ...any) {
 //	logger := New("app").Enable()
 //	logger.Panic("Panic error") // Output: [app] ERROR: Panic error [stack=...], then panics
 func (l *Logger) Panic(args ...any) {
+
 	var builder strings.Builder
 	for i, arg := range args {
 		if i > 0 {
@@ -767,6 +841,12 @@ func (l *Logger) Panic(args ...any) {
 		builder.WriteString(fmt.Sprint(arg))
 	}
 	msg := builder.String()
+
+	if !l.shouldLog(lx.LevelError) {
+		// just panic
+		panic(msg)
+	}
+
 	l.log(lx.LevelError, lx.ClassText, msg, nil, true)
 	panic(msg)
 }
@@ -779,6 +859,11 @@ func (l *Logger) Panic(args ...any) {
 //	x := 42
 //	logger.Dbg(x) // Output: [file.go:123] x = 42
 func (l *Logger) Dbg(values ...interface{}) {
+	// fast path
+	if !l.shouldLog(lx.LevelInfo) {
+		return
+	}
+
 	l.dbg(2, values...)
 }
 
@@ -904,6 +989,7 @@ func (l *Logger) Dump(values ...interface{}) {
 //	logger := New("app").Enable()
 //	logger.Info("Test") // Calls log(lx.LevelInfo, "Test", nil, false)
 func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields map[string]interface{}, withStack bool) {
+
 	// Check if the log should be emitted
 	if !l.shouldLog(level) {
 		return
@@ -931,6 +1017,7 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	if l.indent > 0 {
 		builder.WriteString(strings.Repeat(lx.DoubleSpace, l.indent))
 	}
+
 	if l.prefix != "" {
 		builder.WriteString(l.prefix)
 	}
@@ -986,7 +1073,6 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 //	    // Log would be skipped
 //	}
 func (l *Logger) shouldLog(level lx.LevelType) bool {
-
 	if !Active() { // Assuming Active is in the 'll' package or imported
 		return false
 	}

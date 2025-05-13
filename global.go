@@ -195,8 +195,8 @@ func Print(args ...any) {
 // or a slice of errors if multiple are non-nil. It logs the concatenated string representations
 // of non-nil errors (e.g., "failed 1; failed 2") at the Error level. Returns the FieldBuilder
 // for chaining, allowing further field additions or logging. Thread-safe via the logger’s mutex.
-func Err(errs ...error) *Logger {
-	return defaultLogger.Err(errs...)
+func Err(errs ...error) {
+	defaultLogger.Err(errs...)
 }
 
 // Start activates the global logging system.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/olekukonko/ll/lx"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -66,12 +67,16 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 		Fields:    e.Fields,
 		Stack:     e.Stack,
 	}
-
 	enc := json.NewEncoder(h.writer)
 	if h.pretty {
 		enc.SetIndent("", "  ")
 	}
-	return enc.Encode(entry)
+	fmt.Fprintf(os.Stderr, "Encoding JSON entry: %v\n", e.Message)
+	err := enc.Encode(entry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "JSON encode error: %v\n", err)
+	}
+	return err
 }
 
 func (h *JSONHandler) handleDump(e *lx.Entry) error {
