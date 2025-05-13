@@ -35,8 +35,8 @@ type Logger struct {
 	prefix          string                 // Prefix prepended to log messages
 	indent          int                    // Number of double spaces to indent messages
 	stackBufferSize int                    // Buffer size for stack trace capture
-	separator       string
-	entries         atomic.Int64
+	separator       string                 // Separator for namespace paths (e.g., "/")
+	entries         atomic.Int64           // Counter for total log entries sent to handler
 }
 
 // New creates a new logger instance with the specified namespace and optional configurations.
@@ -53,18 +53,19 @@ type Logger struct {
 //	entries := logger.handler.(*MemoryHandler).Entries()
 func New(namespace string, opts ...Option) *Logger {
 	logger := &Logger{
-		enabled:         lx.DefaultEnabled,
-		level:           lx.LevelDebug,
-		namespaces:      defaultStore,
-		currentPath:     namespace,
-		context:         make(map[string]interface{}),
-		style:           lx.FlatPath,
-		handler:         lh.NewTextHandler(os.Stdout),
-		middleware:      make([]Middleware, 0),
-		stackBufferSize: 4096,
-		separator:       lx.Slash,
+		enabled:         lx.DefaultEnabled,            // Default to disabled (false)
+		level:           lx.LevelDebug,                // Default minimum log level
+		namespaces:      defaultStore,                 // Shared namespace store
+		currentPath:     namespace,                    // Initial namespace path
+		context:         make(map[string]interface{}), // Empty context for fields
+		style:           lx.FlatPath,                  // Default namespace style ([parent/child])
+		handler:         lh.NewTextHandler(os.Stdout), // Default text output to stdout
+		middleware:      make([]Middleware, 0),        // Empty middleware chain
+		stackBufferSize: 4096,                         // Default stack trace buffer size
+		separator:       lx.Slash,                     // Default namespace separator ("/")
 	}
 
+	// Apply configuration options
 	for _, opt := range opts {
 		opt(logger)
 	}
@@ -83,6 +84,7 @@ func (l *Logger) AddContext(key string, value interface{}) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// Initialize context map if nil
 	if l.context == nil {
 		l.context = make(map[string]interface{})
 	}
@@ -143,18 +145,18 @@ func (l *Logger) Clone() *Logger {
 	defer l.mu.RUnlock()
 
 	return &Logger{
-		enabled:         l.enabled,
-		level:           l.level,
-		namespaces:      l.namespaces,
-		currentPath:     l.currentPath,
-		context:         make(map[string]interface{}),
-		style:           l.style,
-		handler:         l.handler,
-		middleware:      l.middleware,
-		prefix:          l.prefix,
-		indent:          l.indent,
-		stackBufferSize: l.stackBufferSize,
-		separator:       lx.Slash,
+		enabled:         l.enabled,                    // Copy enablement state
+		level:           l.level,                      // Copy log level
+		namespaces:      l.namespaces,                 // Share namespace store
+		currentPath:     l.currentPath,                // Copy namespace path
+		context:         make(map[string]interface{}), // Fresh context map
+		style:           l.style,                      // Copy namespace style
+		handler:         l.handler,                    // Copy output handler
+		middleware:      l.middleware,                 // Copy middleware chain
+		prefix:          l.prefix,                     // Copy message prefix
+		indent:          l.indent,                     // Copy indentation level
+		stackBufferSize: l.stackBufferSize,            // Copy stack trace buffer size
+		separator:       lx.Slash,                     // Default separator ("/")
 	}
 }
 
@@ -171,6 +173,7 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// Create a new logger with inherited configuration
 	newLogger := &Logger{
 		enabled:         l.enabled,
 		level:           l.level,
@@ -186,10 +189,12 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 		separator:       lx.Slash,
 	}
 
+	// Copy parent's context fields
 	for k, v := range l.context {
 		newLogger.context[k] = v
 	}
 
+	// Add new fields
 	for k, v := range fields {
 		newLogger.context[k] = v
 	}
@@ -205,7 +210,7 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 //	x := 42
 //	logger.Dbg(x) // Output: [file.go:123] x = 42
 func (l *Logger) Dbg(values ...interface{}) {
-
+	// Skip logging if Info level is not enabled
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
@@ -220,7 +225,7 @@ func (l *Logger) Dbg(values ...interface{}) {
 //	logger := New("app").Enable().Level(lx.LevelDebug)
 //	logger.Debug("Debugging") // Output: [app] DEBUG: Debugging
 func (l *Logger) Debug(format string, args ...any) {
-
+	// Skip logging if Debug level is not enabled
 	if !l.shouldLog(lx.LevelDebug) {
 		return
 	}
@@ -250,47 +255,58 @@ func (l *Logger) Disable() *Logger {
 //	type Data struct { X int; Y string }
 //	logger.Dump(Data{42, "test"})
 func (l *Logger) Dump(values ...interface{}) {
-
+	// Iterate over each value to dump
 	for _, value := range values {
+		// Log a description of the value and its type
 		l.Info("Dumping %v (%T)", value, value)
 		var by []byte
 		var err error
 
+		// Convert value to byte slice based on type
 		switch v := value.(type) {
 		case []byte:
 			by = v
 		case string:
 			by = []byte(v)
 		case float32:
+			// Convert float32 to 4-byte big-endian representation
 			buf := make([]byte, 4)
 			binary.BigEndian.PutUint32(buf, math.Float32bits(v))
 			by = buf
 		case float64:
+			// Convert float64 to 8-byte big-endian representation
 			buf := make([]byte, 8)
 			binary.BigEndian.PutUint64(buf, math.Float64bits(v))
 			by = buf
 		case int, int8, int16, int32, int64:
+			// Convert signed integer to 8-byte big-endian representation
 			by = make([]byte, 8)
 			binary.BigEndian.PutUint64(by, uint64(reflect.ValueOf(v).Int()))
 		case uint, uint8, uint16, uint32, uint64:
+			// Convert unsigned integer to 8-byte big-endian representation
 			by = make([]byte, 8)
 			binary.BigEndian.PutUint64(by, reflect.ValueOf(v).Uint())
 		case io.Reader:
+			// Read all bytes from io.Reader
 			by, err = io.ReadAll(v)
 		default:
+			// Fallback to JSON marshaling for complex types
 			by, err = json.Marshal(v)
 		}
 
+		// Log error if conversion fails
 		if err != nil {
 			l.Error("Dump error: %v", err)
 			continue
 		}
 
+		// Generate hex/ASCII dump
 		n := len(by)
 		rowcount := 0
 		stop := (n / 8) * 8
 		k := 0
 		s := strings.Builder{}
+		// Process 8-byte rows
 		for i := 0; i <= stop; i += 8 {
 			k++
 			if i+8 < n {
@@ -298,17 +314,21 @@ func (l *Logger) Dump(values ...interface{}) {
 			} else {
 				rowcount = min(k*8, n) % 8
 			}
+			// Write position and hex prefix
 			s.WriteString(fmt.Sprintf("pos %02d  hex:  ", i))
 
+			// Write hex values
 			for j := 0; j < rowcount; j++ {
 				s.WriteString(fmt.Sprintf("%02x  ", by[i+j]))
 			}
+			// Pad with spaces for alignment
 			for j := rowcount; j < 8; j++ {
 				s.WriteString(fmt.Sprintf("    "))
 			}
+			// Write ASCII representation
 			s.WriteString(fmt.Sprintf("  '%s'\n", viewString(by[i:(i+rowcount)])))
-
 		}
+		// Log the hex/ASCII dump
 		l.log(lx.LevelNone, lx.ClassDump, s.String(), nil, false)
 	}
 }
@@ -355,13 +375,14 @@ func (l *Logger) Enabled() bool {
 //	// Output: [app] ERROR: failed 1; failed 2
 //	//         [app] INFO: Error occurred [error=[failed 1 failed 2]]
 func (l *Logger) Err(errs ...error) {
-
+	// Skip logging if Error level is not enabled
 	if !l.shouldLog(lx.LevelError) {
 		return
 	}
 
 	l.mu.Lock()
 
+	// Initialize context map if nil
 	if l.context == nil {
 		l.context = make(map[string]interface{})
 	}
@@ -383,17 +404,16 @@ func (l *Logger) Err(errs ...error) {
 
 	if count > 0 {
 		if count == 1 {
-
+			// Store single error directly
 			l.context["error"] = nonNilErrors[0]
 		} else {
-
+			// Store slice of errors
 			l.context["error"] = nonNilErrors
 		}
-
+		// Log concatenated error messages
 		l.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
 	}
 	l.mu.Unlock()
-
 }
 
 // Error logs a message at Error level.
@@ -403,7 +423,7 @@ func (l *Logger) Err(errs ...error) {
 //	logger := New("app").Enable()
 //	logger.Error("Error occurred") // Output: [app] ERROR: Error occurred
 func (l *Logger) Error(format string, args ...any) {
-
+	// Skip logging if Error level is not enabled
 	if !l.shouldLog(lx.LevelError) {
 		return
 	}
@@ -419,12 +439,12 @@ func (l *Logger) Error(format string, args ...any) {
 //	logger := New("app").Enable()
 //	logger.Fatal("Fatal error") // Output: [app] ERROR: Fatal error [stack=...], then exits
 func (l *Logger) Fatal(args ...any) {
-
+	// Exit immediately if Error level is not enabled
 	if !l.shouldLog(lx.LevelError) {
-
 		os.Exit(1)
 	}
 
+	// Build message by concatenating arguments with spaces
 	var builder strings.Builder
 	for i, arg := range args {
 		if i > 0 {
@@ -445,6 +465,7 @@ func (l *Logger) Fatal(args ...any) {
 //	logger.Field(map[string]interface{}{"user": "alice"}).Info("Action") // Output: [app] INFO: Action [user=alice]
 func (l *Logger) Field(fields map[string]interface{}) *FieldBuilder {
 	fb := &FieldBuilder{logger: l, fields: make(map[string]interface{})}
+	// Copy fields from input map to FieldBuilder
 	for k, v := range fields {
 		fb.fields[k] = v
 	}
@@ -460,18 +481,28 @@ func (l *Logger) Field(fields map[string]interface{}) *FieldBuilder {
 //	logger.Fields("user", "alice").Info("Action") // Output: [app] INFO: Action [user=alice]
 func (l *Logger) Fields(pairs ...any) *FieldBuilder {
 	fb := &FieldBuilder{logger: l, fields: make(map[string]interface{})}
+	// Process key-value pairs
 	for i := 0; i < len(pairs)-1; i += 2 {
 		if key, ok := pairs[i].(string); ok {
 			fb.fields[key] = pairs[i+1]
 		} else {
+			// Log error for non-string keys
 			fb.fields["error"] = fmt.Errorf("non-string key in Fields: %v", pairs[i])
 		}
 	}
+	// Log error for uneven pairs
 	if len(pairs)%2 != 0 {
 		fb.fields["error"] = fmt.Errorf("uneven key-value pairs in Fields: [%v]", pairs[len(pairs)-1])
 	}
 	return fb
 }
+
+// GetContext returns the logger's context map, containing persistent key-value fields.
+// It provides thread-safe read access to the context using a read lock.
+// Example:
+//
+//	logger := New("app").AddContext("user", "alice")
+//	ctx := logger.GetContext() // Returns map[string]interface{}{"user": "alice"}
 func (l *Logger) GetContext() map[string]interface{} {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -482,11 +513,10 @@ func (l *Logger) GetContext() map[string]interface{} {
 // This provides access to the underlying logging handler for customization
 // or inspection. The returned handler should not be modified concurrently
 // with logger operations.
-//
 // Example:
 //
 //	logger := New("app")
-//	logger.GetHandler
+//	handler := logger.GetHandler() // Returns the current handler (e.g., TextHandler)
 func (l *Logger) GetHandler() lx.Handler {
 	return l.handler
 }
@@ -504,25 +534,38 @@ func (l *Logger) GetLevel() lx.LevelType {
 	defer l.mu.RUnlock()
 	return l.level
 }
+
+// GetPath returns the logger's current namespace path.
+// It provides thread-safe read access to the currentPath field using a read lock.
+// Example:
+//
+//	logger := New("app").Namespace("sub")
+//	path := logger.GetPath() // Returns "app/sub"
 func (l *Logger) GetPath() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.currentPath
 }
 
+// GetSeparator returns the logger's namespace separator (e.g., "/").
+// It provides thread-safe read access to the separator field using a read lock.
+// Example:
+//
+//	logger := New("app").Separator(".")
+//	sep := logger.GetSeparator() // Returns "."
 func (l *Logger) GetSeparator() string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.separator
 }
 
-// GetLevel returns the minimum log level for the logger.
-// It provides thread-safe read access to the level field using a read lock.
+// GetStyle returns the logger's namespace formatting style (FlatPath or NestedPath).
+// It provides thread-safe read access to the style field using a read lock.
 // Example:
 //
-//	logger := New("app").Level(lx.LevelWarn)
-//	if logger.GetLevel() == lx.LevelWarn {
-//	    logger.Warn("Warning level set") // Output: [app] WARN: Warning level set
+//	logger := New("app").Style(lx.NestedPath)
+//	if logger.GetStyle() == lx.NestedPath {
+//	    logger.Info("Nested style") // Output: [app]: INFO: Nested style
 //	}
 func (l *Logger) GetStyle() lx.StyleType {
 	l.mu.RLock()
@@ -566,16 +609,21 @@ func (l *Logger) Indent(depth int) *Logger {
 //	logger := New("app").Enable().Style(lx.NestedPath)
 //	logger.Info("Started") // Output: [app]: INFO: Started
 func (l *Logger) Info(format string, args ...any) {
-
+	// Skip logging if Info level is not enabled
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-
 	msg := fmt.Sprintf(format, args...)
 	l.log(lx.LevelInfo, lx.ClassText, msg, nil, false)
 }
 
-// Len counts the total number of values sent to handler
+// Len returns the total number of log entries sent to the handler.
+// It provides thread-safe access to the entries counter using atomic operations.
+// Example:
+//
+//	logger := New("app").Enable()
+//	logger.Info("Test")
+//	count := logger.Len() // Returns 1
 func (l *Logger) Len() int64 {
 	return l.entries.Load()
 }
@@ -599,22 +647,22 @@ func (l *Logger) Level(level lx.LevelType) *Logger {
 // If no arguments are provided, it defaults to 1 newline.
 // If multiple values are given, they are summed to determine the total lines.
 // This is useful for visually separating log sections.
-//
 // Thread-safe (uses a write lock internally).
 // Returns the logger for method chaining.
-//
 // Example:
 //
 //	logger := New("app").Enable()
 //	logger.Line(2).Info("After 2 newlines") // Adds 2 blank lines before logging
 //	logger.Line().Error("After 1 newline")  // Defaults to 1
 func (l *Logger) Line(lines ...int) *Logger {
-	line := 1
+	line := 1 // Default to 1 newline
 	if len(lines) > 0 {
 		line = 0
+		// Sum all provided line counts
 		for _, n := range lines {
 			line += n
 		}
+		// Ensure at least 1 line
 		if line < 1 {
 			line = 1
 		}
@@ -632,6 +680,7 @@ func (l *Logger) Line(lines ...int) *Logger {
 //	// Output: [app] INFO: function executed [duration=~1ms]
 func (l *Logger) Measure(fns ...func()) time.Duration {
 	start := time.Now()
+	// Execute all provided functions
 	for _, fn := range fns {
 		fn()
 	}
@@ -652,11 +701,13 @@ func (l *Logger) Namespace(name string) *Logger {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
+	// Construct full namespace path
 	fullPath := name
 	if l.currentPath != "" {
 		fullPath = l.currentPath + l.separator + name
 	}
 
+	// Create child logger with inherited configuration
 	return &Logger{
 		enabled:         l.enabled,
 		level:           l.level,
@@ -685,6 +736,7 @@ func (l *Logger) NamespaceDisable(relativePath string) *Logger {
 	fullPath := l.joinPath(l.currentPath, relativePath)
 	l.mu.RUnlock()
 
+	// Disable namespace in shared store
 	l.namespaces.Set(fullPath, false)
 	return l
 }
@@ -701,6 +753,7 @@ func (l *Logger) NamespaceEnable(relativePath string) *Logger {
 	fullPath := l.joinPath(l.currentPath, relativePath)
 	l.mu.RUnlock()
 
+	// Enable namespace in shared store
 	l.namespaces.Set(fullPath, true)
 	return l
 }
@@ -722,13 +775,14 @@ func (l *Logger) NamespaceEnabled(relativePath string) bool {
 	instanceEnabled := l.enabled
 	l.mu.RUnlock()
 
+	// Handle root path case
 	if fullPath == "" && relativePath == "" {
 		return instanceEnabled
 	}
 
 	if fullPath != "" {
+		// Check namespace rules
 		isEnabledByNSRule, isDisabledByNSRule := l.namespaces.Enabled(fullPath, separator)
-
 		if isDisabledByNSRule {
 			return false
 		}
@@ -736,6 +790,7 @@ func (l *Logger) NamespaceEnabled(relativePath string) bool {
 			return true
 		}
 	}
+	// Fall back to logger's enabled state
 	return instanceEnabled
 }
 
@@ -747,7 +802,7 @@ func (l *Logger) NamespaceEnabled(relativePath string) bool {
 //	logger := New("app").Enable()
 //	logger.Panic("Panic error") // Output: [app] ERROR: Panic error [stack=...], then panics
 func (l *Logger) Panic(args ...any) {
-
+	// Build message by concatenating arguments with spaces
 	var builder strings.Builder
 	for i, arg := range args {
 		if i > 0 {
@@ -757,8 +812,8 @@ func (l *Logger) Panic(args ...any) {
 	}
 	msg := builder.String()
 
+	// Panic immediately if Error level is not enabled
 	if !l.shouldLog(lx.LevelError) {
-
 		panic(msg)
 	}
 
@@ -788,11 +843,12 @@ func (l *Logger) Prefix(prefix string) *Logger {
 //	logger := New("app").Enable()
 //	logger.Print("message", "value") // Output: [app] INFO: message value
 func (l *Logger) Print(args ...any) {
-
+	// Skip logging if Info level is not enabled
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
 
+	// Build message by concatenating arguments with spaces
 	var builder strings.Builder
 	for i, arg := range args {
 		if i > 0 {
@@ -807,14 +863,25 @@ func (l *Logger) Print(args ...any) {
 
 // Remove removes middleware by the reference returned from Use.
 // It delegates to the Middleware’s Remove method for thread-safe removal.
+// Example:
+//
+//	logger := New("app").Enable()
+//	mw := logger.Use(someMiddleware)
+//	logger.Remove(mw) // Removes middleware
 func (l *Logger) Remove(m *Middleware) {
 	m.Remove()
 }
 
-// Separator is use to group namespaces and log entries.
+// Separator sets the namespace separator for grouping namespaces and log entries.
+// It updates the separator used in namespace paths (e.g., "/" or "."). Thread-safe with write lock.
+// Returns the logger for method chaining.
+// Example:
+//
+//	logger := New("app").Separator(".")
+//	logger.Namespace("sub").Info("Log") // Output: [app.sub] INFO: Log
 func (l *Logger) Separator(separator string) *Logger {
 	l.mu.Lock()
-	l.mu.Unlock()
+	defer l.mu.Unlock()
 	l.separator = separator
 	return l
 }
@@ -827,7 +894,7 @@ func (l *Logger) Separator(separator string) *Logger {
 //	logger := New("app").Enable()
 //	logger.Stack("Critical error") // Output: [app] ERROR: Critical error [stack=...]
 func (l *Logger) Stack(format string, args ...any) {
-
+	// Skip logging if Debug level is not enabled
 	if !l.shouldLog(lx.LevelDebug) {
 		return
 	}
@@ -884,8 +951,9 @@ func (l *Logger) Use(fn lx.Handler) *Middleware {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	// Assign a unique ID to the middleware
 	id := len(l.middleware) + 1
-
+	// Append middleware to the chain
 	l.middleware = append(l.middleware, Middleware{id: id, fn: fn})
 
 	return &Middleware{
@@ -901,7 +969,7 @@ func (l *Logger) Use(fn lx.Handler) *Middleware {
 //	logger := New("app").Enable()
 //	logger.Warn("Warning") // Output: [app] WARN: Warning
 func (l *Logger) Warn(format string, args ...any) {
-
+	// Skip logging if Warn level is not enabled
 	if !l.shouldLog(lx.LevelWarn) {
 		return
 	}
@@ -909,27 +977,38 @@ func (l *Logger) Warn(format string, args ...any) {
 	l.log(lx.LevelWarn, lx.ClassText, msg, nil, false)
 }
 
+// dbg is an internal helper for Dbg, logging debug information with source file and line number.
+// It extracts the calling line of code and logs the expression and its value.
+// Thread-safe via the log method.
+// Example (internal usage):
+//
+//	logger.Dbg(x) // Calls dbg(2, x)
 func (l *Logger) dbg(skip int, values ...interface{}) {
 	for _, exp := range values {
+		// Get caller information (file, line)
 		_, file, line, ok := runtime.Caller(skip)
 		if !ok {
 			l.log(lx.LevelError, lx.ClassText, "Dbg: Unable to parse runtime caller", nil, false)
 			return
 		}
 
+		// Open source file
 		f, err := os.Open(file)
 		if err != nil {
 			l.log(lx.LevelError, lx.ClassText, "Dbg: Unable to open expected file", nil, false)
 			return
 		}
 
+		// Scan file to find the line
 		scanner := bufio.NewScanner(f)
 		scanner.Split(bufio.ScanLines)
 		var out string
 		i := 1
 		for scanner.Scan() {
 			if i == line {
+				// Extract expression between parentheses
 				v := scanner.Text()[strings.Index(scanner.Text(), "(")+1 : len(scanner.Text())-strings.Index(reverseString(scanner.Text()), ")")-1]
+				// Format output with file, line, expression, and value
 				out = fmt.Sprintf("[%s:%d] %s = %+v", file[len(file)-strings.Index(reverseString(file), "/"):], line, v, exp)
 				break
 			}
@@ -939,6 +1018,7 @@ func (l *Logger) dbg(skip int, values ...interface{}) {
 			l.log(lx.LevelError, lx.ClassText, err.Error(), nil, false)
 			return
 		}
+		// Log based on value type
 		switch exp.(type) {
 		case error:
 			l.log(lx.LevelError, lx.ClassText, out, nil, false)
@@ -952,6 +1032,9 @@ func (l *Logger) dbg(skip int, values ...interface{}) {
 
 // joinPath joins a base path and a relative path using the logger's separator.
 // Handles cases where base or relative path might be empty.
+// Example (internal usage):
+//
+//	logger.joinPath("parent", "child") // Returns "parent/child"
 func (l *Logger) joinPath(base, relative string) string {
 	if base == "" {
 		return relative
@@ -961,7 +1044,7 @@ func (l *Logger) joinPath(base, relative string) string {
 	}
 	separator := l.separator
 	if separator == "" {
-		separator = lx.Slash
+		separator = lx.Slash // Default separator
 	}
 	return base + separator + relative
 }
@@ -975,13 +1058,14 @@ func (l *Logger) joinPath(base, relative string) string {
 //	logger := New("app").Enable()
 //	logger.Info("Test") // Calls log(lx.LevelInfo, "Test", nil, false)
 func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields map[string]interface{}, withStack bool) {
-
+	// Skip logging if level is not enabled
 	if !l.shouldLog(level) {
 		return
 	}
 
 	var stack []byte
 
+	// Capture stack trace if requested
 	if withStack {
 		l.mu.RLock()
 		buf := make([]byte, l.stackBufferSize)
@@ -1001,13 +1085,13 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	if l.indent > 0 {
 		builder.WriteString(strings.Repeat(lx.DoubleSpace, l.indent))
 	}
-
 	if l.prefix != "" {
 		builder.WriteString(l.prefix)
 	}
 	builder.WriteString(msg)
 	finalMsg := builder.String()
 
+	// Create log entry
 	entry := &lx.Entry{
 		Timestamp: time.Now(),
 		Level:     level,
@@ -1019,6 +1103,7 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 		Stack:     stack,
 	}
 
+	// Merge context fields, avoiding overwrites
 	if len(l.context) > 0 {
 		if entry.Fields == nil {
 			entry.Fields = make(map[string]interface{})
@@ -1030,13 +1115,14 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 		}
 	}
 
+	// Apply middleware, stopping if any returns an error
 	for _, mw := range l.middleware {
 		if err := mw.fn.Handle(entry); err != nil {
-
 			return
 		}
 	}
 
+	// Pass to handler if set
 	if l.handler != nil {
 		_ = l.handler.Handle(entry)
 		l.entries.Add(1)
@@ -1053,10 +1139,12 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 //	    // Log would be skipped
 //	}
 func (l *Logger) shouldLog(level lx.LevelType) bool {
+	// Skip if global logging system is inactive
 	if !Active() {
 		return false
 	}
 
+	// Skip if log level is below minimum
 	if level < l.level {
 		return false
 	}
@@ -1066,18 +1154,18 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 		separator = lx.Slash
 	}
 
+	// Check namespace rules if path is set
 	if l.currentPath != "" {
 		isEnabledByNSRule, isDisabledByNSRule := l.namespaces.Enabled(l.currentPath, separator)
-
 		if isDisabledByNSRule {
 			return false
 		}
 		if isEnabledByNSRule {
 			return true
 		}
-
 	}
 
+	// Fall back to logger's enabled state
 	if !l.enabled {
 		return false
 	}
@@ -1086,6 +1174,10 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 }
 
 // WithHandler sets the handler for the logger.
+// It is a functional option for configuring a new logger instance.
+// Example:
+//
+//	logger := New("app", WithHandler(lh.NewJSONHandler(os.Stdout)))
 func WithHandler(handler lx.Handler) Option {
 	return func(l *Logger) {
 		l.handler = handler
@@ -1093,6 +1185,10 @@ func WithHandler(handler lx.Handler) Option {
 }
 
 // WithLevel sets the minimum log level for the logger.
+// It is a functional option for configuring a new logger instance.
+// Example:
+//
+//	logger := New("app", WithLevel(lx.LevelWarn))
 func WithLevel(level lx.LevelType) Option {
 	return func(l *Logger) {
 		l.level = level
@@ -1100,6 +1196,10 @@ func WithLevel(level lx.LevelType) Option {
 }
 
 // WithStyle sets the namespace formatting style for the logger.
+// It is a functional option for configuring a new logger instance.
+// Example:
+//
+//	logger := New("app", WithStyle(lx.NestedPath))
 func WithStyle(style lx.StyleType) Option {
 	return func(l *Logger) {
 		l.style = style
