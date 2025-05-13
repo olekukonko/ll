@@ -295,3 +295,10 @@ func Field(fields map[string]interface{}) *FieldBuilder {
 func Line(lines ...int) *Logger {
 	return defaultLogger.Line(lines...)
 }
+
+// Indent sets the indentation level for all log messages of the current logger.
+// Each level adds two spaces to the log message, useful for hierarchical output.
+// Thread-safe with write lock. Returns the logger for method chaining.
+func Indent(depth int) *Logger {
+	return defaultLogger.Indent(depth)
+}
