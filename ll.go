@@ -240,13 +240,17 @@ func (l *Logger) Indent(depth int) *Logger {
 //	logger.Line(2).Info("After 2 newlines") // Adds 2 blank lines before logging
 //	logger.Line().Error("After 1 newline")  // Defaults to 1
 func (l *Logger) Line(lines ...int) *Logger {
-	line := 0 // Default to 1 newline if no args
+	line := 1 // Default to 1 newline if no args
 	if len(lines) > 0 {
+		line = 0
 		for _, n := range lines {
 			line += n
 		}
+		if line < 1 {
+			line = 1 // Ensure at least 1 line
+		}
 	}
-	l.Print(strings.Repeat(lx.Newline, line))
+	l.log(lx.LevelNone, lx.ClassRaw, strings.Repeat(lx.Newline, line), nil, false)
 	return l
 }
 
