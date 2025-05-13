@@ -280,3 +280,11 @@ func Fields(pairs ...any) *FieldBuilder {
 func Field(fields map[string]interface{}) *FieldBuilder {
 	return defaultLogger.Field(fields)
 }
+
+// Line adds vertical spacing (newlines) to the log output.
+// If no arguments are provided, it defaults to 1 newline.
+// If multiple values are given, they are summed to determine the total lines.
+// This is useful for visually separating log sections.
+func Line(lines ...int) *Logger {
+	return defaultLogger.Line(lines...)
+}

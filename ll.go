@@ -226,6 +226,35 @@ func (l *Logger) Indent(depth int) *Logger {
 	return l
 }
 
+// Line adds vertical spacing (newlines) to the log output.
+// If no arguments are provided, it defaults to 1 newline.
+// If multiple values are given, they are summed to determine the total lines.
+// This is useful for visually separating log sections.
+//
+// Thread-safe (uses a write lock internally).
+// Returns the logger for method chaining.
+//
+// Example:
+//
+//	logger := New("app").Enable()
+//	logger.Line(2).Info("After 2 newlines") // Adds 2 blank lines before logging
+//	logger.Line().Error("After 1 newline")  // Defaults to 1
+func (l *Logger) Line(lines ...int) *Logger {
+	line := 1 // Default to 1 newline if no args
+	if len(lines) > 0 {
+		line = 0
+		for _, n := range lines {
+			line += n
+		}
+		if line < 1 {
+			line = 1 // Ensure at least 1 line
+		}
+	}
+
+	l.Print(strings.Repeat(lx.Newline, line))
+	return l
+}
+
 // Handler sets the handler for processing log entries.
 // It configures the output destination and format (e.g., text, JSON) for logs.
 // Thread-safe with write lock. Returns the logger for method chaining.
