@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/olekukonko/ll/lx"
-	"os"
 )
 
 // MultiHandler combines multiple handlers to process log entries concurrently.
@@ -26,7 +25,7 @@ func (h *MultiHandler) Handle(e *lx.Entry) error {
 	var errs []error
 	for i, handler := range h.Handlers {
 		if err := handler.Handle(e); err != nil {
-			fmt.Fprintf(os.Stderr, "MultiHandler error for handler %d: %v\n", i, err)
+			// fmt.Fprintf(os.Stderr, "MultiHandler error for handler %d: %v\n", i, err)
 			errs = append(errs, fmt.Errorf("handler %d: %w", i, err))
 		}
 	}

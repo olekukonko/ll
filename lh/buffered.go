@@ -186,7 +186,6 @@ func (b *Buffered[H]) worker() {
 // flushBatch processes a batch of entries through the wrapped handler.
 func (b *Buffered[H]) flushBatch(batch []*lx.Entry) {
 	for _, entry := range batch {
-		fmt.Fprintf(os.Stderr, "Flushing entry: %v\n", entry.Message) // Keep for debugging, remove later
 		if err := b.handler.Handle(entry); err != nil {
 			fmt.Fprintf(os.Stderr, "log flush error: %v\n", err) // Changed from io.Discard
 		}
@@ -198,7 +197,6 @@ func (b *Buffered[H]) drainRemaining() {
 	for {
 		select {
 		case entry := <-b.entries:
-			fmt.Fprintf(os.Stderr, "Draining entry: %v\n", entry.Message)
 			if err := b.handler.Handle(entry); err != nil {
 				fmt.Fprintf(os.Stderr, "log drain error: %v\n", err)
 			}
