@@ -35,10 +35,10 @@ func TestNamespaceEnableWithCustomSeparator(t *testing.T) {
 
 	// Test logging
 	buf.Reset()
-	a.Info("hello a from custom sep")
-	b.Info("hello b from custom sep")
-	c.Info("hello c from custom sep")
-	d.Info("hello d from custom sep")
+	a.Infof("hello a from custom sep")
+	b.Infof("hello b from custom sep")
+	c.Infof("hello c from custom sep")
+	d.Infof("hello d from custom sep")
 	output := buf.String()
 
 	// Expected logs
@@ -75,7 +75,7 @@ func TestNamespaces(t *testing.T) {
 	// Test flat path logging
 	child.Style(lx.FlatPath)
 	buf.Reset()
-	child.Info("Child log")
+	child.Infof("Child log")
 	expectedFlatLog := "[parent/child] INFO: Child log"
 	if !strings.Contains(buf.String(), expectedFlatLog) {
 		t.Errorf("Expected %q, got %q", expectedFlatLog, buf.String())
@@ -85,7 +85,7 @@ func TestNamespaces(t *testing.T) {
 	logger.Style(lx.NestedPath)
 	child.Style(lx.NestedPath)
 	buf.Reset()
-	child.Info("Nested log")
+	child.Infof("Nested log")
 	expectedNestedLog := expectedNestedLogPrefix(child, lx.Arrow) + "INFO: Nested log"
 	if !strings.Contains(buf.String(), expectedNestedLog) {
 		t.Errorf("Expected %q, got %q", expectedNestedLog, buf.String())
@@ -101,7 +101,7 @@ func TestNamespaces(t *testing.T) {
 	}
 
 	buf.Reset()
-	child.Info("Should not log this")
+	child.Infof("Should not log this")
 	if buf.String() != "" {
 		t.Errorf("Expected empty output, got %q", buf.String())
 	}
@@ -116,7 +116,7 @@ func TestNamespaces(t *testing.T) {
 	}
 
 	buf.Reset()
-	child.Info("Should log this again")
+	child.Infof("Should log this again")
 	expectedReEnabledLog := expectedNestedLogPrefix(child, lx.Arrow) + "INFO: Should log this again"
 	if !strings.Contains(buf.String(), expectedReEnabledLog) {
 		t.Errorf("Expected %q, got %q", expectedReEnabledLog, buf.String())
@@ -169,7 +169,7 @@ func TestSharedNamespaces(t *testing.T) {
 
 	// Test logging (should be blocked)
 	buf.Reset()
-	child.Info("Should not log from child")
+	child.Infof("Should not log from child")
 	if buf.String() != "" {
 		t.Errorf("Expected no output from %q, got %q", child.GetPath(), buf.String())
 	}
@@ -185,7 +185,7 @@ func TestSharedNamespaces(t *testing.T) {
 
 	// Test logging (should appear)
 	buf.Reset()
-	child.Info("Should log from child")
+	child.Infof("Should log from child")
 	expectedLog := "[parent/child] INFO: Should log from child"
 	if !strings.Contains(buf.String(), expectedLog) {
 		t.Errorf("Expected %q, got %q", expectedLog, buf.String())
@@ -230,10 +230,10 @@ func TestNamespaceHierarchicalOverride(t *testing.T) {
 	}
 
 	// Test logging
-	c1.Info("Log from c1")
-	c1d2.Info("Log from c1d2")
-	c1d2e3.Info("Log from c1d2e3")
-	c1d2e3f4.Info("Log from c1d2e3f4")
+	c1.Infof("Log from c1")
+	c1d2.Infof("Log from c1d2")
+	c1d2e3.Infof("Log from c1d2e3")
+	c1d2e3f4.Infof("Log from c1d2e3f4")
 
 	// Verify outputs
 	if strings.Contains(bufC1.String(), "Log from c1") {

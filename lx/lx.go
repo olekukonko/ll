@@ -31,11 +31,11 @@ const (
 // These constants define the severity levels for log messages, used to filter logs based
 // on the logger’s minimum level. They are ordered to allow comparison (e.g., LevelDebug < LevelWarn).
 const (
-	LevelDebug LevelType = iota // Debug level for detailed diagnostic information
+	LevelNone  LevelType = iota // Debug level for detailed diagnostic information
 	LevelInfo                   // Info level for general operational messages
 	LevelWarn                   // Warn level for warning conditions
 	LevelError                  // Error level for error conditions requiring attention
-	LevelNone                   // None level for logs without a specific severity (e.g., raw output)
+	LevelDebug                  // None level for logs without a specific severity (e.g., raw output)
 )
 
 // Log class constants, defining the type of log entry.

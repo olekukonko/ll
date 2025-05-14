@@ -28,7 +28,7 @@ func TestLoggerConfiguration(t *testing.T) {
 
 	// Test Enable/Disable functionality
 	logger = logger.Disable()
-	logger.Info("Should not log") // Should be ignored since logger is disabled
+	logger.Infof("Should not log") // Should be ignored since logger is disabled
 	if logger.Enabled() {
 		t.Errorf("Expected enabled=false, got %v", logger.Enabled())
 	}
@@ -42,8 +42,8 @@ func TestLoggerConfiguration(t *testing.T) {
 	if logger.GetLevel() != lx.LevelWarn {
 		t.Errorf("Expected level=%v, got %v", lx.LevelWarn, logger.GetLevel())
 	}
-	logger.Info("Should not log") // Below Warn level, should be ignored
-	logger.Warn("Should log")     // At Warn level, should be processed
+	logger.Infof("Should not log") // Below Warn level, should be ignored
+	logger.Warnf("Should log")     // At Warn level, should be processed
 
 	// Test Style functionality
 	logger = logger.Style(lx.NestedPath)
@@ -64,35 +64,35 @@ func TestLoggingMethods(t *testing.T) {
 
 	// Test Debug logging
 	buf.Reset()
-	logger.Fields("key", "value").Debug("Debug message")
+	logger.Fields("key", "value").Debugf("Debug message")
 	if !strings.Contains(buf.String(), "[test] DEBUG: Debug message [key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] DEBUG: Debug message [key=value]")
 	}
 
 	// Test Info logging
 	buf.Reset()
-	logger.Fields("key", "value").Info("Info message")
+	logger.Fields("key", "value").Infof("Info message")
 	if !strings.Contains(buf.String(), "[test] INFO: Info message [key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Info message [key=value]")
 	}
 
 	// Test Warn logging
 	buf.Reset()
-	logger.Fields("key", "value").Warn("Warn message")
+	logger.Fields("key", "value").Warnf("Warn message")
 	if !strings.Contains(buf.String(), "[test] WARN: Warn message [key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] WARN: Warn message [key=value]")
 	}
 
 	// Test Error logging
 	buf.Reset()
-	logger.Fields("key", "value").Error("Error message")
+	logger.Fields("key", "value").Errorf("Error message")
 	if !strings.Contains(buf.String(), "[test] ERROR: Error message [key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] ERROR: Error message [key=value]")
 	}
 
 	// Test Stack logging with stack trace
 	buf.Reset()
-	logger.Fields("key", "value").Stack("Error with stack")
+	logger.Fields("key", "value").Stackf("Error with stack")
 	output := buf.String()
 	if !strings.Contains(output, "[test] ERROR: Error with stack") {
 		t.Errorf("Expected %q to contain %q", output, "[test] ERROR: Error with stack")
@@ -113,7 +113,7 @@ func TestBuilderFields(t *testing.T) {
 
 	// Test variadic Fields with multiple key-value pairs
 	buf.Reset()
-	logger.Fields("k1", "v1", "k2", "v2", "k3", 123).Info("Test variadic")
+	logger.Fields("k1", "v1", "k2", "v2", "k3", 123).Infof("Test variadic")
 	if !strings.Contains(buf.String(), "[test] INFO: Test variadic [k1=v1 k2=v2 k3=123]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test variadic [k1=v1 k2=v2 k3=123]")
 	}
@@ -121,21 +121,21 @@ func TestBuilderFields(t *testing.T) {
 	// Test map-based Field with a pre-constructed map
 	buf.Reset()
 	fields := map[string]interface{}{"k1": "v1", "k2": "v2", "k3": 123}
-	logger.Field(fields).Info("Test map")
+	logger.Field(fields).Infof("Test map")
 	if !strings.Contains(buf.String(), "[test] INFO: Test map [k1=v1 k2=v2 k3=123]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test map [k1=v1 k2=v2 k3=123]")
 	}
 
 	// Test variadic Fields with uneven key-value pairs
 	buf.Reset()
-	logger.Fields("k1", "v1", "k2").Info("Test uneven")
+	logger.Fields("k1", "v1", "k2").Infof("Test uneven")
 	if !strings.Contains(buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]")
 	}
 
 	// Test variadic Fields with a non-string key
 	buf.Reset()
-	logger.Fields("k1", "v1", 42, "v2").Info("Test non-string")
+	logger.Fields("k1", "v1", 42, "v2").Infof("Test non-string")
 	if !strings.Contains(buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]")
 	}
@@ -150,8 +150,8 @@ func TestRateLimiting(t *testing.T) {
 
 	// Test logging within the rate limit (2 logs allowed)
 	buf.Reset()
-	logger.Info("Log 1")
-	logger.Info("Log 2")
+	logger.Infof("Log 1")
+	logger.Infof("Log 2")
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 2 {
 		t.Errorf("Expected %d logs, got %d", 2, len(lines))
@@ -165,7 +165,7 @@ func TestRateLimiting(t *testing.T) {
 
 	// Test exceeding the rate limit
 	buf.Reset()
-	logger.Info("Log 3") // Should be blocked
+	logger.Infof("Log 3") // Should be blocked
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
@@ -173,7 +173,7 @@ func TestRateLimiting(t *testing.T) {
 	// Test logging after the interval resets
 	time.Sleep(time.Second)
 	buf.Reset()
-	logger.Info("Log 4")
+	logger.Infof("Log 4")
 	if !strings.Contains(buf.String(), "Log 4") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "Log 4")
 	}
@@ -187,7 +187,7 @@ func TestSampling(t *testing.T) {
 
 	// Test logging with 0.0 sampling rate
 	buf.Reset()
-	logger.Info("Should not log")
+	logger.Infof("Should not log")
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
@@ -196,7 +196,7 @@ func TestSampling(t *testing.T) {
 	logger = ll.New("test").Enable().Handler(lh.NewTextHandler(buf)).Clear() // Fresh logger
 	logger.Use(lm.NewSampling(lx.LevelInfo, 1.0))                            // Always log
 	buf.Reset()
-	logger.Info("Should log")
+	logger.Infof("Should log")
 	if !strings.Contains(buf.String(), "[test] INFO: Should log") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Should log")
 	}
@@ -210,14 +210,14 @@ func TestConditionalLogging(t *testing.T) {
 
 	// Test false condition with variadic Fields
 	buf.Reset()
-	logger.If(false).Fields("key", "value").Info("Should not log")
+	logger.If(false).Fields("key", "value").Infof("Should not log")
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
 
 	// Test true condition with variadic Fields
 	buf.Reset()
-	logger.If(true).Fields("key", "value").Info("Should log")
+	logger.If(true).Fields("key", "value").Infof("Should log")
 	if !strings.Contains(buf.String(), "[VC] INFO: Should log [key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Should log [key=value]")
 	}
@@ -225,28 +225,28 @@ func TestConditionalLogging(t *testing.T) {
 	// Test false condition with map-based Field
 	buf.Reset()
 	fields := map[string]interface{}{"key": "value"}
-	logger.If(false).Field(fields).Info("Should not log")
+	logger.If(false).Field(fields).Infof("Should not log")
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
 
 	// Test true condition with map-based Field
 	buf.Reset()
-	logger.If(true).Field(fields).Info("Should log")
+	logger.If(true).Field(fields).Infof("Should log")
 	if !strings.Contains(buf.String(), "[VC] INFO: Should log [key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Should log [key=value]")
 	}
 
 	// Test variadic Fields with uneven pairs under true condition
 	buf.Reset()
-	logger.If(true).Fields("key", "value", "odd").Info("Test uneven")
+	logger.If(true).Fields("key", "value", "odd").Infof("Test uneven")
 	if !strings.Contains(buf.String(), "[VC] INFO: Test uneven [error=uneven key-value pairs in Fields: [odd] key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test uneven [error=uneven key-value pairs in Fields: [odd] key=value]")
 	}
 
 	// Test variadic Fields with non-string key under true condition
 	buf.Reset()
-	logger.If(true).Fields("key", "value", 42, "value2").Info("Test non-string")
+	logger.If(true).Fields("key", "value", 42, "value2").Infof("Test non-string")
 	if !strings.Contains(buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]")
 	}
@@ -256,13 +256,13 @@ func TestConditionalLogging(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := ll.New("test/app").Enable().Style(lx.NestedPath).Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug).Prefix("ERR: ").Indent(1)
 		logger = logger.Context(map[string]interface{}{"ctx": "value"})
-		logger.If(true).Stack("error occurred: %v", "timeout")
+		logger.If(true).Stackf("error occurred: %v", "timeout")
 		expectedStack := "[stack]"
 		if !strings.Contains(buf.String(), expectedStack) {
 			t.Errorf("Expected %q to contain %q; \ngot %q", buf.String(), expectedStack, buf.String())
 		}
 		buf.Reset()
-		logger.If(false).Stack("should not log: %v", "timeout")
+		logger.If(false).Stackf("should not log: %v", "timeout")
 		if buf.String() != "" {
 			t.Errorf("Expected empty buffer, got %q", buf.String())
 		}
@@ -285,7 +285,7 @@ func TestMiddleware(t *testing.T) {
 	})).Logger()
 
 	buf.Reset()
-	logger.Info("Test with extra field")
+	logger.Infof("Test with extra field")
 	if !strings.Contains(buf.String(), "[test] INFO: Test with extra field [extra=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test with extra field [extra=value]")
 	}
@@ -298,12 +298,12 @@ func TestMiddleware(t *testing.T) {
 		return fmt.Errorf("level too low")
 	})).Logger()
 	buf.Reset()
-	logger.Info("Should not log") // Below Warn level, should be ignored
+	logger.Infof("Should not log") // Below Warn level, should be ignored
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
 	buf.Reset()
-	logger.Warn("Should log")
+	logger.Warnf("Should log")
 	if !strings.Contains(buf.String(), "[test] WARN: Should log [extra=value]") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] WARN: Should log [extra=value]")
 	}
@@ -313,7 +313,7 @@ func TestMiddleware(t *testing.T) {
 		return fmt.Errorf("skip all")
 	})).Logger()
 	buf.Reset()
-	logger.Warn("Should not log") // Should be ignored by middleware
+	logger.Warnf("Should not log") // Should be ignored by middleware
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
@@ -350,7 +350,7 @@ func TestClone(t *testing.T) {
 		t.Logf("Parent context: %v", logger.GetContext()) // Use GetContext
 		clone := logger.Clone()
 		buf.Reset()
-		clone.Fields("clone", "value").Info("Clone message")
+		clone.Fields("clone", "value").Infof("Clone message")
 		expected := "[app]" + lx.Colon + lx.Space + "INFO: Clone message [clone=value]"
 		output := buf.String()
 		t.Logf("Clone output: %q", output)
@@ -366,7 +366,7 @@ func TestClone(t *testing.T) {
 		t.Logf("Parent context before logging: %v", logger.GetContext()) // Use GetContext
 		t.Logf("Parent enabled: %v, system active: %v", logger.Enabled(), ll.Active())
 		buf.Reset()
-		logger.Info("Parent message")
+		logger.Infof("Parent message")
 		output := buf.String()
 		expected := "[app]" + lx.Colon + lx.Space + "INFO: Parent message [parent=value]"
 		t.Logf("Parent output: %q", output)
@@ -389,7 +389,7 @@ func TestPrefix(t *testing.T) {
 	t.Run("SetPrefix", func(t *testing.T) {
 		buf.Reset()
 		logger = logger.Prefix("INFO: ")
-		logger.Info("Test message")
+		logger.Infof("Test message")
 		output := buf.String()
 		//t.Logf("Buffer output: %q", output)
 		if !strings.Contains(output, "INFO: Test message") {
@@ -401,7 +401,7 @@ func TestPrefix(t *testing.T) {
 	t.Run("UpdatePrefix", func(t *testing.T) {
 		buf.Reset()
 		logger = logger.Prefix("DEBUG: ")
-		logger.Info("Another message")
+		logger.Infof("Another message")
 		output := buf.String()
 		if !strings.Contains(output, "DEBUG: Another message") {
 			t.Errorf("Expected %q to contain %q", output, "DEBUG: Another message")
@@ -412,7 +412,7 @@ func TestPrefix(t *testing.T) {
 	t.Run("RemovePrefix", func(t *testing.T) {
 		buf.Reset()
 		logger = logger.Prefix("")
-		logger.Info("No prefix")
+		logger.Infof("No prefix")
 		output := buf.String()
 		if !strings.Contains(output, "INFO: No prefix") {
 			t.Errorf("Expected message without prefix, got: %q", output)
@@ -430,7 +430,7 @@ func TestIndent(t *testing.T) {
 	t.Run("SetIndent", func(t *testing.T) {
 		logger = logger.Indent(2)
 		buf.Reset()
-		logger.Info("Test message")
+		logger.Infof("Test message")
 		output := buf.String()
 		t.Logf("Buffer output: %q", output) // Debug output
 		if !strings.Contains(output, "[app] INFO:     Test message") {
@@ -442,7 +442,7 @@ func TestIndent(t *testing.T) {
 	t.Run("UpdateIndent", func(t *testing.T) {
 		logger = logger.Indent(1)
 		buf.Reset()
-		logger.Info("Another message")
+		logger.Infof("Another message")
 		if !strings.Contains(buf.String(), "[app] INFO:   Another message") {
 			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO:   Another message")
 		}
@@ -452,7 +452,7 @@ func TestIndent(t *testing.T) {
 	t.Run("RemoveIndent", func(t *testing.T) {
 		logger = logger.Indent(0)
 		buf.Reset()
-		logger.Info("No indent")
+		logger.Infof("No indent")
 		if !strings.Contains(buf.String(), "[app] INFO: No indent") {
 			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: No indent")
 		}
@@ -473,7 +473,7 @@ func TestHandlerErrors(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := ll.New("test").Enable().Level(lx.LevelDebug).Handler(lh.NewTextHandler(buf))
 
-	logger.Info("Test single handler")
+	logger.Infof("Test single handler")
 	if !strings.Contains(buf.String(), "[test] INFO: Test single handler") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test single handler")
 	}
@@ -484,7 +484,7 @@ func TestHandlerErrors(t *testing.T) {
 		lh.NewTextHandler(buf),
 		lh.NewTextHandler(&failingWriter{}),
 	))
-	logger.Info("Test multi error")
+	logger.Infof("Test multi error")
 	if !strings.Contains(buf.String(), "[test] INFO: Test multi error") {
 		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test multi error")
 	}
@@ -496,11 +496,11 @@ func TestNamespaceToggle(t *testing.T) {
 	logger := ll.New("test").Disable()
 	logger = logger.NamespaceEnable("parent/child")
 	if !logger.NamespaceEnabled("parent/child") {
-		t.Error("parent/child should be enabled")
+		t.Errorf("parent/child should be enabled")
 	}
 	logger = logger.NamespaceDisable("parent/child")
 	if logger.Enabled() {
-		t.Error("parent/child should be disabled")
+		t.Errorf("parent/child should be disabled")
 	}
 }
 

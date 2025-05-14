@@ -17,7 +17,7 @@ func TestHandlers(t *testing.T) {
 	t.Run("TextHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := ll.New("test").Enable().Handler(lh.NewTextHandler(buf))
-		logger.Fields("key", "value").Info("Test text")
+		logger.Fields("key", "value").Infof("Test text")
 		if !strings.Contains(buf.String(), "[test] INFO: Test text [key=value]") {
 			t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test text [key=value]")
 		}
@@ -27,7 +27,7 @@ func TestHandlers(t *testing.T) {
 	t.Run("ColorizedHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := ll.New("test").Enable().Handler(lh.NewColorizedHandler(buf))
-		logger.Fields("key", "value").Info("Test color")
+		logger.Fields("key", "value").Infof("Test color")
 		// Check for namespace presence, ignoring ANSI codes
 		if !strings.Contains(buf.String(), "[test]") {
 			t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test color [key=value]")
@@ -38,7 +38,7 @@ func TestHandlers(t *testing.T) {
 	t.Run("JSONHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := ll.New("test").Enable().Handler(lh.NewJSONHandler(buf))
-		logger.Fields("key", "value").Info("Test JSON")
+		logger.Fields("key", "value").Infof("Test JSON")
 		// Parse JSON output and verify fields
 		var data lh.JsonOutput
 		if err := json.Unmarshal(buf.Bytes(), &data); err != nil {
@@ -63,7 +63,7 @@ func TestHandlers(t *testing.T) {
 	t.Run("SlogHandler", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		logger := ll.New("test").Enable().Handler(lh.NewSlogHandler(slog.NewTextHandler(buf, nil)))
-		logger.Fields("key", "value").Info("Test slog")
+		logger.Fields("key", "value").Infof("Test slog")
 		output := buf.String()
 		if !strings.Contains(output, "level=INFO") {
 			t.Errorf("Expected %q to contain %q", output, "level=INFO")
@@ -87,7 +87,7 @@ func TestHandlers(t *testing.T) {
 			lh.NewTextHandler(buf1),
 			lh.NewJSONHandler(buf2),
 		))
-		logger.Fields("key", "value").Info("Test multi")
+		logger.Fields("key", "value").Infof("Test multi")
 		// Verify TextHandler output
 		if !strings.Contains(buf1.String(), "[test] INFO: Test multi [key=value]") {
 			t.Errorf("Expected %q to contain %q", buf1.String(), "[test] INFO: Test multi [key=value]")

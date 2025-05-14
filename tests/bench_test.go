@@ -17,7 +17,7 @@ func BenchmarkNamespaceLoop(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		child := logger.Namespace(fmt.Sprintf("child%d", i))
-		child.Info("Message")
+		child.Infof("Message")
 	}
 }
 
@@ -33,7 +33,7 @@ func BenchmarkNamespaceCached(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		childLoggers[i].Info("Message")
+		childLoggers[i].Infof("Message")
 	}
 }
 
@@ -46,7 +46,7 @@ func BenchmarkCloneLoop(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		clone := logger.Clone()
-		clone.Info("Message")
+		clone.Infof("Message")
 	}
 }
 
@@ -59,7 +59,7 @@ func BenchmarkFieldsLoggerLoop(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		newLogger := logger.Fields("iteration", i).Logger()
-		newLogger.Info("Message")
+		newLogger.Infof("Message")
 	}
 }
 
@@ -72,7 +72,7 @@ func BenchmarkPrefixLoop(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		logger.Prefix(fmt.Sprintf("prefix%d: ", i))
-		logger.Info("Message")
+		logger.Infof("Message")
 	}
 }
 
@@ -85,6 +85,6 @@ func BenchmarkIndentLoop(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		logger.Indent(i % 5) // Vary indentation up to 5 levels
-		logger.Info("Message")
+		logger.Infof("Message")
 	}
 }
