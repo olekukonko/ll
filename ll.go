@@ -430,7 +430,7 @@ func (l *Logger) Error(args ...any) {
 //	logger := New("app").Enable()
 //	logger.Errorf("Error %s", "occurred") // Output: [app] ERROR: Error occurred
 func (l *Logger) Errorf(format string, args ...any) {
-	l.Error(fmt.Sprintf(format, args...))
+	l.Error(fmt.Errorf(format, args...))
 }
 
 // Fatal logs a message at Error level with a stack trace and exits the program with
