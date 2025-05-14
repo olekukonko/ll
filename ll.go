@@ -847,18 +847,7 @@ func (l *Logger) Print(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-
-	// Build message by concatenating arguments with spaces
-	var builder strings.Builder
-	for i, arg := range args {
-		if i > 0 {
-			builder.WriteString(lx.Space)
-		}
-		builder.WriteString(fmt.Sprint(arg))
-	}
-
-	builder.WriteString(lx.Newline)
-	l.log(lx.LevelNone, lx.ClassRaw, builder.String(), nil, false)
+	l.log(lx.LevelNone, lx.ClassRaw, ConcatAll(lx.Space, nil, []any{lx.Newline}, args...), nil, false)
 }
 
 // Remove removes middleware by the reference returned from Use.
