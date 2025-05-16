@@ -149,7 +149,8 @@ func (l *Logger) Clone() *Logger {
 		prefix:          l.prefix,                     // Copy message prefix
 		indent:          l.indent,                     // Copy indentation level
 		stackBufferSize: l.stackBufferSize,            // Copy stack trace buffer size
-		separator:       lx.Slash,                     // Default separator ("/")
+		separator:       l.separator,                  // Default separator ("/")
+		suspend:         l.suspend,
 	}
 }
 
@@ -178,7 +179,8 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 		prefix:          l.prefix,
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
-		separator:       lx.Slash,
+		separator:       l.separator,
+		suspend:         l.suspend,
 	}
 
 	// Copy parent's context fields
@@ -788,6 +790,7 @@ func (l *Logger) Namespace(name string) *Logger {
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
 		separator:       l.separator,
+		suspend:         l.suspend,
 	}
 }
 
