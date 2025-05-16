@@ -526,3 +526,28 @@ func TestTextHandler(t *testing.T) {
 		t.Errorf("Unexpected output: %s", buf.String())
 	}
 }
+
+func TestSates(t *testing.T) {
+	t.Run("SuspendAndResume", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := ll.New("app").Enable().Handler(lh.NewTextHandler(buf))
+		logger.Suspend()
+		if !logger.Suspended() {
+			t.Error("Expected logger to be suspended")
+		}
+		logger.Info("Ignored") // Should not appear
+		logger.Resume()
+		if logger.Suspended() {
+			t.Error("Expected logger to be resumed")
+		}
+
+		logger.Info("Logged")
+		output := buf.String()
+		if strings.Contains(output, "Ignored") {
+			t.Error("Expected 'Ignored' to be suppressed")
+		}
+		if !strings.Contains(output, "Logged") {
+			t.Error("Expected 'Logged' in output")
+		}
+	})
+}
