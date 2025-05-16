@@ -948,10 +948,18 @@ func (l *Logger) Remove(m *Middleware) {
 	m.Remove()
 }
 
+// Resume reactivates logging for the current logger after it has been suspended.
+// It clears the suspend flag, allowing logs to be emitted if other conditions (e.g., level, namespace)
+// are met. Thread-safe with a write lock. Returns the logger for method chaining.
+// Example:
+//
+//	logger := New("app").Enable().Suspend()
+//	logger.Resume()
+//	logger.Info("Resumed") // Output: [app] INFO: Resumed
 func (l *Logger) Resume() *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.suspend = false
+	l.suspend = false // Clear suspend flag to resume logging
 	return l
 }
 
@@ -968,11 +976,33 @@ func (l *Logger) Separator(separator string) *Logger {
 	return l
 }
 
+// Suspend temporarily deactivates logging for the current logger.
+// It sets the suspend flag, suppressing all logs regardless of level or namespace until resumed.
+// Thread-safe with a write lock. Returns the logger for method chaining.
+// Example:
+//
+//	logger := New("app").Enable()
+//	logger.Suspend()
+//	logger.Info("Ignored") // No output
 func (l *Logger) Suspend() *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.suspend = true
+	l.suspend = true // Set suspend flag to pause logging
 	return l
+}
+
+// Suspended returns whether the logger is currently suspended.
+// It provides thread-safe read access to the suspend flag using a write lock.
+// Example:
+//
+//	logger := New("app").Enable().Suspend()
+//	if logger.Suspended() {
+//	    fmt.Println("Logging is suspended") // Prints message
+//	}
+func (l *Logger) Suspended() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.suspend // Return current suspend state
 }
 
 // Stack logs messages at Error level with a stack trace for each provided argument.
