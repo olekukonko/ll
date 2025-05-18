@@ -924,6 +924,24 @@ func (l *Logger) Print(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
+	l.log(lx.LevelNone, lx.ClassRaw, concatSpaced(args...), nil, false)
+}
+
+// Println logs a message at Info level without format specifiers, minimizing allocations
+// by concatenating arguments with spaces. It is thread-safe via the log method.
+// Example:
+//
+//	logger := New("app").Enable()
+//	logger.Print("message", "value") // Output: [app] INFO: message value
+func (l *Logger) Println(args ...any) {
+	if l.suspend {
+		return
+	}
+
+	// Skip logging if Info level is not enabled
+	if !l.shouldLog(lx.LevelInfo) {
+		return
+	}
 	l.log(lx.LevelNone, lx.ClassRaw, concatenate(lx.Space, nil, []any{lx.Newline}, args...), nil, false)
 }
 
