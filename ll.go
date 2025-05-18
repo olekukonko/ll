@@ -932,7 +932,7 @@ func (l *Logger) Print(args ...any) {
 // Example:
 //
 //	logger := New("app").Enable()
-//	logger.Print("message", "value") // Output: [app] INFO: message value
+//	logger.Println("message", "value") // Output: [app] INFO: message value
 func (l *Logger) Println(args ...any) {
 	if l.suspend {
 		return

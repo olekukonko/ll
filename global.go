@@ -431,6 +431,15 @@ func Print(args ...any) {
 	defaultLogger.Print(args...)
 }
 
+// Println logs a message at Info level without format specifiers, minimizing allocations
+// by concatenating arguments with spaces. It is thread-safe via the log method.
+// Example:
+//
+//	ll.Println("message", "value") // Output: [] INFO: message value [New Line]
+func Println(args ...any) {
+	defaultLogger.Println(args...)
+}
+
 // Printf logs a message at Info level with a format string using the default logger.
 // It formats the message and delegates to defaultLogger’s Printf method. Thread-safe via
 // the Logger’s log method.
