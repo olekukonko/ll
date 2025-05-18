@@ -729,11 +729,11 @@ func (l *Logger) Line(lines ...int) *Logger {
 // Example:
 //
 //	logger.Mark() // *MARK*: [file.go:123]
-func (l *Logger) Mark() {
-	l.mark(2)
+func (l *Logger) Mark(name ...string) {
+	l.mark(2, name...)
 }
 
-func (l *Logger) mark(skip int) {
+func (l *Logger) mark(skip int, names ...string) {
 	// Skip logging if Info level is not enabled
 	if !l.shouldLog(lx.LevelInfo) {
 		return
@@ -752,8 +752,13 @@ func (l *Logger) mark(skip int) {
 		shortFile = file[idx+1:]
 	}
 
+	name := strings.Join(names, l.separator)
+	if name == "" {
+		name = "MARK"
+	}
+
 	// Format as [filename:line]
-	out := fmt.Sprintf("*MARK*: [%s:%d]\n", shortFile, line)
+	out := fmt.Sprintf("[*%s*]: [%s:%d]\n", name, shortFile, line)
 	l.log(lx.LevelInfo, lx.ClassRaw, out, nil, false)
 }
 

@@ -653,7 +653,7 @@ func Indent(depth int) *Logger {
 // Example:
 //
 //	logger.Mark() // *MARK*: [file.go:123]
-func Mark() {
-	defaultLogger.mark(2)
+func Mark(names ...string) {
+	defaultLogger.mark(2, names...)
 
 }
