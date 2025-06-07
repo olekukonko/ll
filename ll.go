@@ -95,10 +95,9 @@ func (l *Logger) AddContext(key string, value interface{}) *Logger {
 //	logger := New("app").Enable()
 //	start := time.Now()
 //	logger.Benchmark(start) // Output: [app] INFO: benchmark [start=... end=... duration=...]
-func (l *Logger) Benchmark(operation string, start time.Time) time.Duration {
+func (l *Logger) Benchmark(start time.Time) time.Duration {
 	duration := time.Since(start)
 	l.Fields(
-		"operation", operation,
 		"duration_ms", duration.Milliseconds(),
 		"duration", duration.String(),
 	).Infof("benchmark completed")
@@ -784,7 +783,6 @@ func (l *Logger) Measure(fns ...func()) time.Duration {
 	}
 
 	duration := time.Since(start)
-
 	l.Fields(
 		"duration_ns", duration.Nanoseconds(),
 		"duration", duration.String(),
