@@ -95,9 +95,14 @@ func (l *Logger) AddContext(key string, value interface{}) *Logger {
 //	logger := New("app").Enable()
 //	start := time.Now()
 //	logger.Benchmark(start) // Output: [app] INFO: benchmark [start=... end=... duration=...]
-func (l *Logger) Benchmark(start time.Time) time.Duration {
+func (l *Logger) Benchmark(operation string, start time.Time) time.Duration {
 	duration := time.Since(start)
-	l.Fields("start", start, "end", time.Now(), "duration", duration).Infof("benchmark")
+	l.Fields(
+		"operation", operation,
+		"duration_ms", duration.Milliseconds(),
+		"duration", duration.String(),
+	).Infof("benchmark completed")
+
 	return duration
 }
 
@@ -771,12 +776,21 @@ func (l *Logger) mark(skip int, names ...string) {
 //	// Output: [app] INFO: function executed [duration=~1ms]
 func (l *Logger) Measure(fns ...func()) time.Duration {
 	start := time.Now()
-	// Execute all provided functions
+
 	for _, fn := range fns {
-		fn()
+		if fn != nil {
+			fn()
+		}
 	}
+
 	duration := time.Since(start)
-	l.Fields("duration", duration).Infof("function executed")
+
+	l.Fields(
+		"duration_ns", duration.Nanoseconds(),
+		"duration", duration.String(),
+		"duration_ms", fmt.Sprintf("%.3fms", float64(duration.Nanoseconds())/1e6),
+	).Infof("execution completed")
+
 	return duration
 }
 
