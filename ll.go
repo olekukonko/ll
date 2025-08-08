@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/olekukonko/cat"
 	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
 	"io"
@@ -233,7 +234,7 @@ func (l *Logger) Debug(args ...any) {
 		return
 	}
 
-	l.log(lx.LevelDebug, lx.ClassText, concatSpaced(args...), nil, false)
+	l.log(lx.LevelDebug, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Debugf logs a formatted message at Debug level, delegating to Debug. It is thread-safe.
@@ -444,7 +445,7 @@ func (l *Logger) Error(args ...any) {
 	if !l.shouldLog(lx.LevelError) {
 		return
 	}
-	l.log(lx.LevelError, lx.ClassText, concatSpaced(args...), nil, false)
+	l.log(lx.LevelError, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Errorf logs a formatted message at Error level, delegating to Error. It is thread-safe.
@@ -478,7 +479,7 @@ func (l *Logger) Fatal(args ...any) {
 		os.Exit(1)
 	}
 
-	l.log(lx.LevelError, lx.ClassText, concatSpaced(args...), nil, true)
+	l.log(lx.LevelError, lx.ClassText, cat.Space(args...), nil, true)
 	os.Exit(1)
 }
 
@@ -662,7 +663,7 @@ func (l *Logger) Info(args ...any) {
 		return
 	}
 
-	l.log(lx.LevelInfo, lx.ClassText, concatSpaced(args...), nil, false)
+	l.log(lx.LevelInfo, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Infof logs a formatted message at Info level, delegating to Info. It is thread-safe.
@@ -909,7 +910,7 @@ func (l *Logger) NamespaceEnabled(relativePath string) bool {
 //	logger.Panic("Panic error") // Output: [app] ERROR: Panic error [stack=...], then panics
 func (l *Logger) Panic(args ...any) {
 	// Build message by concatenating arguments with spaces
-	msg := concatSpaced(args...)
+	msg := cat.Space(args...)
 
 	if l.suspend {
 		panic(msg)
@@ -962,7 +963,7 @@ func (l *Logger) Print(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-	l.log(lx.LevelNone, lx.ClassRaw, concatSpaced(args...), nil, false)
+	l.log(lx.LevelNone, lx.ClassRaw, cat.Space(args...), nil, false)
 }
 
 // Println logs a message at Info level without format specifiers, minimizing allocations
@@ -980,7 +981,7 @@ func (l *Logger) Println(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-	l.log(lx.LevelNone, lx.ClassRaw, concatenate(lx.Space, nil, []any{lx.Newline}, args...), nil, false)
+	l.log(lx.LevelNone, lx.ClassRaw, cat.SuffixWith(lx.Space, lx.Newline, args...), nil, false)
 }
 
 // Printf logs a formatted message at Info level, delegating to Print. It is thread-safe.
@@ -1081,7 +1082,7 @@ func (l *Logger) Stack(args ...any) {
 	}
 
 	for _, arg := range args {
-		l.log(lx.LevelError, lx.ClassText, concat(arg), nil, true)
+		l.log(lx.LevelError, lx.ClassText, cat.Concat(arg), nil, true)
 	}
 }
 
@@ -1192,7 +1193,7 @@ func (l *Logger) Warn(args ...any) {
 		return
 	}
 
-	l.log(lx.LevelWarn, lx.ClassText, concatSpaced(args...), nil, false)
+	l.log(lx.LevelWarn, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Warnf logs a formatted message at Warn level, delegating to Warn. It is thread-safe.
