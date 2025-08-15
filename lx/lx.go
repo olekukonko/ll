@@ -1,6 +1,7 @@
 package lx
 
 import (
+	"strings"
 	"time"
 )
 
@@ -31,11 +32,12 @@ const (
 // These constants define the severity levels for log messages, used to filter logs based
 // on the logger’s minimum level. They are ordered to allow comparison (e.g., LevelDebug < LevelWarn).
 const (
-	LevelNone  LevelType = iota // Debug level for detailed diagnostic information
-	LevelInfo                   // Info level for general operational messages
-	LevelWarn                   // Warn level for warning conditions
-	LevelError                  // Error level for error conditions requiring attention
-	LevelDebug                  // None level for logs without a specific severity (e.g., raw output)
+	LevelNone    LevelType = iota // Debug level for detailed diagnostic information
+	LevelInfo                     // Info level for general operational messages
+	LevelWarn                     // Warn level for warning conditions
+	LevelError                    // Error level for error conditions requiring attention
+	LevelDebug                    // None level for logs without a specific severity (e.g., raw output)
+	LevelUnknown                  // None level for logs without a specific severity (e.g., raw output)
 )
 
 // Log class constants, defining the type of log entry.
@@ -61,6 +63,25 @@ const (
 // It is an integer type used to define log levels (Debug, Info, Warn, Error, None), with associated
 // string representations for display in log output.
 type LevelType int
+
+// LevelParse converts a string to its corresponding LevelType.
+// It's case-insensitive and returns LevelUnknown for invalid strings.
+func LevelParse(s string) LevelType {
+	switch strings.ToUpper(s) {
+	case "DEBUG":
+		return LevelDebug
+	case "INFO":
+		return LevelInfo
+	case "WARN", "WARNING": // Allow both "WARN" and "WARNING"
+		return LevelWarn
+	case "ERROR":
+		return LevelError
+	case "NONE":
+		return LevelNone
+	default:
+		return LevelUnknown
+	}
+}
 
 // String converts a LevelType to its string representation.
 // It maps each level constant to a human-readable string, returning "UNKNOWN" for invalid levels.
