@@ -71,6 +71,31 @@ func New(namespace string, opts ...Option) *Logger {
 	return logger
 }
 
+// Apply applies one or more functional options to the default/global logger.
+// Useful for late configuration (e.g., after migration, attach VictoriaLogs handler,
+// set level, add middleware, etc.) without changing existing New() calls.
+//
+// Example:
+//
+//	// In main() or init(), after setting up handler
+//	ll.Apply(
+//	    ll.Handler(vlBatched),
+//	    ll.Level(ll.LevelInfo),
+//	    ll.Use(rateLimiterMiddleware),
+//	)
+//
+// Returns the default logger for chaining (if needed).
+func (l *Logger) Apply(opts ...Option) *Logger {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(l)
+		}
+	}
+	return l
+}
+
 // AddContext adds a key-value pair to the logger's context, modifying it directly.
 // Unlike Context, it mutates the existing context. It is thread-safe using a write lock.
 // Example:
