@@ -52,3 +52,16 @@ func WithStyle(style lx.StyleType) Option {
 		l.style = style
 	}
 }
+
+// Functional options (can be passed to New() or applied later)
+func WithFatalExits(enabled bool) Option {
+	return func(l *Logger) {
+		l.fatalExits = enabled
+	}
+}
+
+func WithFatalStack(enabled bool) Option {
+	return func(l *Logger) {
+		l.fatalStack = enabled
+	}
+}

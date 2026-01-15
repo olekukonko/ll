@@ -39,6 +39,8 @@ type Logger struct {
 	stackBufferSize int                    // Buffer size for capturing stack traces
 	separator       string                 // Separator for namespace paths (e.g., "/")
 	entries         atomic.Int64           // Tracks total log entries sent to handler
+	fatalExits      bool
+	fatalStack      bool
 }
 
 // New creates a new Logger with the given namespace and optional configurations.
@@ -96,22 +98,46 @@ func (l *Logger) Apply(opts ...Option) *Logger {
 	return l
 }
 
-// AddContext adds a key-value pair to the logger's context, modifying it directly.
-// Unlike Context, it mutates the existing context. It is thread-safe using a write lock.
-// Example:
+// AddContext adds one or more key-value pairs to the logger's persistent context.
+// These fields will be included in **every** subsequent log message from this logger
+// (and its child namespace loggers).
 //
-//	logger := New("app").Enable()
-//	logger.AddContext("user", "alice")
-//	logger.Info("Action") // Output: [app] INFO: Action [user=alice]
-func (l *Logger) AddContext(key string, value interface{}) *Logger {
+// It supports variadic key-value pairs (string key, any value).
+// Non-string keys or uneven number of arguments will be safely ignored/logged.
+//
+// Returns the logger for chaining.
+//
+// Examples:
+//
+//	logger.AddContext("user", "alice", "env", "prod")
+//	logger.AddContext("request_id", reqID, "trace_id", traceID)
+//	logger.AddContext("service", "payment")                    // single pair
+func (l *Logger) AddContext(pairs ...any) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Initialize context map if nil
+	// Lazy initialization of context map
 	if l.context == nil {
 		l.context = make(map[string]interface{})
 	}
-	l.context[key] = value
+
+	// Process key-value pairs
+	for i := 0; i < len(pairs)-1; i += 2 {
+		key, ok := pairs[i].(string)
+		if !ok {
+			l.Warnf("AddContext: non-string key at index %d: %v", i, pairs[i])
+			continue
+		}
+
+		value := pairs[i+1]
+		l.context[key] = value
+	}
+
+	// Optional: warn about uneven number of arguments
+	if len(pairs)%2 != 0 {
+		l.Warn("AddContext: uneven number of arguments, last value ignored")
+	}
+
 	return l
 }
 
@@ -382,6 +408,7 @@ func (l *Logger) Output(values ...interface{}) {
 	l.output(2, values...)
 }
 
+// mark logs the caller's file and line number along with an optional custom name label for tracing execution flow.
 func (l *Logger) output(skip int, values ...interface{}) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
@@ -561,8 +588,10 @@ func (l *Logger) Fatal(args ...any) {
 		os.Exit(1)
 	}
 
-	l.log(lx.LevelError, lx.ClassText, cat.Space(args...), nil, false)
-	os.Exit(1)
+	l.log(lx.LevelFatal, lx.ClassText, cat.Space(args...), nil, l.fatalStack)
+	if l.fatalExits {
+		os.Exit(1)
+	}
 }
 
 // Fatalf logs a formatted message at Error level with a stack trace and exits the program.
@@ -820,6 +849,7 @@ func (l *Logger) Mark(name ...string) {
 	l.mark(2, name...)
 }
 
+// mark logs the caller's file and line number along with an optional custom name label for tracing execution flow.
 func (l *Logger) mark(skip int, names ...string) {
 	// Skip logging if Info level is not enabled
 	if !l.shouldLog(lx.LevelInfo) {
@@ -1003,7 +1033,7 @@ func (l *Logger) Panic(args ...any) {
 		panic(msg)
 	}
 
-	l.log(lx.LevelError, lx.ClassText, msg, nil, true)
+	l.log(lx.LevelFatal, lx.ClassText, msg, nil, true)
 	panic(msg)
 }
 
