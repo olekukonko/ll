@@ -1253,6 +1253,17 @@ func (l *Logger) Timestamped(enable bool, format ...string) *Logger {
 	return l
 }
 
+// Toggle enables or disables the logger based on the provided boolean value and returns the updated logger instance.
+func (l *Logger) Toggle(v bool) *Logger {
+	if v {
+		l.Resume()
+		return l.Enable()
+	}
+
+	l.Suspend()
+	return l.Disable()
+}
+
 // Use adds a middleware function to process log entries before they are handled, returning
 // a Middleware handle for removal. Middleware returning a non-nil error stops the log.
 // It is thread-safe using a write lock.

@@ -104,6 +104,16 @@ func WithColorPallet(pallet Palette) ColorOption {
 	}
 }
 
+// WithColorShowTime enables or disables the display of timestamps in colored log entries.
+// It controls whether the ColorizedHandler prepends a time string to its output,
+// providing temporal context while maintaining the handler's color formatting.
+// Setting show to true activates the timestamp prefix using the current time format.
+func WithColorShowTime(show bool) ColorOption {
+	return func(c *ColorizedHandler) {
+		c.showTime = show
+	}
+}
+
 // NewColorizedHandler creates a new ColorizedHandler writing to the specified writer.
 // It initializes the handler with a detected or specified color palette and applies
 // optional configuration functions.

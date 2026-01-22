@@ -672,3 +672,7 @@ func Apply(opts ...Option) *Logger {
 	return defaultLogger.Apply(opts...)
 
 }
+
+func Toggle(v bool) *Logger {
+	return defaultLogger.Toggle(v)
+}
