@@ -1332,49 +1332,73 @@ func (l *Logger) Warnf(format string, args ...any) {
 //
 //	logger.Dbg(x) // Calls dbg(2, x)
 func (l *Logger) dbg(skip int, values ...interface{}) {
-	for _, exp := range values {
-		// Get caller information (file, line)
-		_, file, line, ok := runtime.Caller(skip)
-		if !ok {
-			l.log(lx.LevelError, lx.ClassText, "Dbg: Unable to parse runtime caller", nil, false)
-			return
+	// Resolve caller frame robustly.
+	file, line, ok := callerFrame(skip)
+	if !ok {
+		// No frame → still log values
+		for _, exp := range values {
+			l.log(lx.LevelInfo, lx.ClassText, fmt.Sprintf("[?:?] %+v", exp), nil, false)
 		}
+		return
+	}
 
-		// Open source file
-		f, err := os.Open(file)
-		if err != nil {
-			l.log(lx.LevelError, lx.ClassText, "Dbg: Unable to open expected file", nil, false)
-			return
-		}
+	shortFile := file
+	if idx := strings.LastIndex(file, "/"); idx >= 0 {
+		shortFile = file[idx+1:]
+	}
 
-		// Scan file to find the line
-		scanner := bufio.NewScanner(f)
-		scanner.Split(bufio.ScanLines)
-		var out string
+	// Try to read the specific source line (best-effort).
+	srcLine := ""
+	if f, err := os.Open(file); err == nil {
+		sc := bufio.NewScanner(f)
 		i := 1
-		for scanner.Scan() {
+		for sc.Scan() {
 			if i == line {
-				// Extract expression between parentheses
-				v := scanner.Text()[strings.Index(scanner.Text(), "(")+1 : len(scanner.Text())-strings.Index(reverseString(scanner.Text()), ")")-1]
-				// Format output with file, line, expression, and value
-				out = fmt.Sprintf("[%s:%d] %s = %+v", file[len(file)-strings.Index(reverseString(file), "/"):], line, v, exp)
+				srcLine = sc.Text()
 				break
 			}
 			i++
 		}
-		if err := scanner.Err(); err != nil {
-			l.log(lx.LevelError, lx.ClassText, err.Error(), nil, false)
-			return
+		_ = f.Close()
+		// Ignore scan error; srcLine stays empty and we fallback.
+	}
+
+	// Extract expression text best-effort from srcLine.
+	// If it fails, we fallback to just printing the value.
+	expr := ""
+	if srcLine != "" {
+		// Prefer extracting inside Dbg(...)
+		if a := strings.Index(srcLine, "Dbg("); a >= 0 {
+			rest := srcLine[a+len("Dbg("):]
+			if b := strings.LastIndex(rest, ")"); b >= 0 {
+				expr = strings.TrimSpace(rest[:b])
+			}
+		} else {
+			// Fallback: anything inside first (...) on the line
+			a := strings.Index(srcLine, "(")
+			b := strings.LastIndex(srcLine, ")")
+			if a >= 0 && b > a {
+				expr = strings.TrimSpace(srcLine[a+1 : b])
+			}
 		}
-		// Log based on value type
+	}
+
+	for _, exp := range values {
+		var out string
+		if expr != "" {
+			out = fmt.Sprintf("[%s:%d] %s = %+v", shortFile, line, expr, exp)
+		} else {
+			// IMPORTANT: this is what makes it work in compiled binaries
+			// even when the source file is not present.
+			out = fmt.Sprintf("[%s:%d] %+v", shortFile, line, exp)
+		}
+
 		switch exp.(type) {
 		case error:
 			l.log(lx.LevelError, lx.ClassText, out, nil, false)
 		default:
 			l.log(lx.LevelInfo, lx.ClassText, out, nil, false)
 		}
-
-		f.Close()
 	}
 }
 
@@ -1524,4 +1548,33 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 	}
 
 	return true
+}
+
+// callerFrame tries to resolve the *user* callsite even when inlining changes.
+// It starts from "skip" but then walks forward until it finds a frame outside
+// this package (ll).
+func callerFrame(skip int) (file string, line int, ok bool) {
+	// +2 to skip callerFrame + dbg itself.
+	pcs := make([]uintptr, 32)
+	n := runtime.Callers(skip+2, pcs)
+	if n == 0 {
+		return "", 0, false
+	}
+
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		fr, more := frames.Next()
+
+		// fr.Function looks like: "github.com/you/mod/ll.(*Logger).Dbg"
+		// We want the first frame that is NOT inside package ll.
+		// Tweak this string check if your module path differs.
+		if fr.Function == "" || !strings.Contains(fr.Function, "/ll.") && !strings.Contains(fr.Function, ".ll.") {
+			return fr.File, fr.Line, true
+		}
+
+		if !more {
+			// Fallback: return the last frame we saw
+			return fr.File, fr.Line, fr.File != ""
+		}
+	}
 }
