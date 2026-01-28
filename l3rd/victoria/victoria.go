@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ import (
 // Example configuration:
 //
 //	config := &Config{
-//	  URL: "http://localhost:9428/insert/jsonline",
+//	  URL: "http://localhost:9428",
 //	  AppName: "myapp",
 //	  Version: "1.0.0",
 //	  Environment: "production",
@@ -35,8 +36,24 @@ import (
 //	}
 type Config struct {
 	// URL is the VictoriaLogs ingestion endpoint.
-	// Default: "http://localhost:9428/insert/jsonline"
+	//
+	// Best practice:
+	// - Set this to the VictoriaLogs base URL, e.g. "http://localhost:9428"
+	// - The handler will append InsertPath automatically.
+	//
+	// Backward compatible:
+	// - If URL already contains "/insert/", it is treated as a full ingestion URL
+	//   (e.g. "http://localhost:9428/insert/jsonline") and InsertPath won't be appended.
+	//
+	// Default: "http://localhost:9428"
 	URL string
+
+	// InsertPath is the ingestion path appended to URL when URL is a base URL.
+	// This lets operators keep secrets/configs stable while the handler chooses
+	// the ingestion format.
+	//
+	// Default: "/insert/jsonline"
+	InsertPath string
 
 	// AppName identifies the application sending logs.
 	// Default: executable name (without .exe extension)
@@ -152,7 +169,8 @@ func New(opts ...Option) (*Victoria, error) {
 
 	// Initialize configuration with defaults
 	config := &Config{
-		URL:         "http://localhost:9428/insert/jsonline",
+		URL:         "http://localhost:9428",
+		InsertPath:  "/insert/jsonline",
 		AppName:     appName,
 		Version:     "unknown",
 		Environment: "production",
@@ -167,6 +185,14 @@ func New(opts ...Option) (*Victoria, error) {
 	// Apply provided options to override defaults
 	for _, opt := range opts {
 		opt(config)
+	}
+
+	// Normalize InsertPath (keep config flexible, do not force operators to include "/")
+	if strings.TrimSpace(config.InsertPath) == "" {
+		config.InsertPath = "/insert/jsonline"
+	}
+	if !strings.HasPrefix(config.InsertPath, "/") {
+		config.InsertPath = "/" + config.InsertPath
 	}
 
 	// Set up HTTP client (use custom or create default)
@@ -304,12 +330,33 @@ func (v *Victoria) sendWithRetry(line map[string]interface{}) error {
 		lastErr = err
 
 		// Don't retry on 4xx errors (client errors - configuration issues)
-		if strings.Contains(err.Error(), "rejected: 4") {
+		if strings.Contains(err.Error(), "rejected: 4") || strings.Contains(err.Error(), "status 4") {
 			break
 		}
 	}
 
 	return lastErr
+}
+
+// endpointURL returns the ingestion URL used by send().
+//
+// Behavior:
+// - If config.URL already contains "/insert/", it is treated as the full ingestion URL.
+// - Otherwise, config.InsertPath is appended to config.URL safely.
+func (v *Victoria) endpointURL() string {
+	raw := strings.TrimSpace(v.config.URL)
+	if raw == "" {
+		raw = "http://localhost:9428"
+	}
+
+	// Backward-compatible: URL may already be the full ingestion endpoint.
+	if strings.Contains(raw, "/insert/") {
+		return strings.TrimRight(raw, "/")
+	}
+
+	base := strings.TrimRight(raw, "/")
+	joinedPath := path.Join("/", strings.TrimPrefix(v.config.InsertPath, "/"))
+	return base + joinedPath
 }
 
 // send performs the actual HTTP request to VictoriaLogs.
@@ -334,7 +381,7 @@ func (v *Victoria) send(line map[string]interface{}) error {
 	// Build URL with VictoriaLogs query parameters
 	streamFields := strings.Join(v.config.StreamKeys, ",")
 	victoriaURL := fmt.Sprintf("%s?_msg_field=msg&_time_field=ts&_stream_fields=%s",
-		v.config.URL, streamFields)
+		v.endpointURL(), streamFields)
 
 	// Create request with timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), v.config.Timeout)
