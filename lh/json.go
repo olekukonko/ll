@@ -93,6 +93,12 @@ func (h *JSONHandler) Handle(e *lx.Entry) error {
 //
 //	h.handleRegular(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes JSON object
 func (h *JSONHandler) handleRegular(e *lx.Entry) error {
+	// Convert ordered fields to map for JSON output
+	fieldsMap := make(map[string]interface{}, len(e.Fields))
+	for _, pair := range e.Fields {
+		fieldsMap[pair.Key] = pair.Value
+	}
+
 	// Create JSON output structure
 	entry := JsonOutput{
 		Time:      e.Timestamp.Format(h.timeFmt), // Format timestamp
@@ -101,7 +107,7 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 		Msg:       e.Message,                     // Set message
 		Namespace: e.Namespace,                   // Set namespace
 		Dump:      nil,                           // No dump for regular entries
-		Fields:    e.Fields,                      // Copy fields
+		Fields:    fieldsMap,                     // Copy fields as map
 		Stack:     e.Stack,                       // Include stack trace if present
 	}
 	// Create JSON encoder
@@ -157,6 +163,12 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 		})
 	}
 
+	// Convert ordered fields to map for JSON output
+	fieldsMap := make(map[string]interface{}, len(e.Fields))
+	for _, pair := range e.Fields {
+		fieldsMap[pair.Key] = pair.Value
+	}
+
 	// Encode JSON output with dump segments
 	return json.NewEncoder(h.writer).Encode(JsonOutput{
 		Time:      e.Timestamp.Format(h.timeFmt), // Format timestamp
@@ -165,7 +177,7 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 		Msg:       "dumping segments",            // Fixed message for dumps
 		Namespace: e.Namespace,                   // Set namespace
 		Dump:      segments,                      // Include parsed segments
-		Fields:    e.Fields,                      // Copy fields
+		Fields:    fieldsMap,                     // Copy fields as map
 		Stack:     e.Stack,                       // Include stack trace if present
 	})
 }

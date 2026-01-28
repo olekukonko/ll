@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -283,23 +282,16 @@ func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 		return
 	}
 
-	// Collect and sort field keys
-	var keys []string
-	for k := range e.Fields {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
 	b.WriteString(lx.Space)
 	b.WriteString(lx.LeftBracket)
-	// Format fields as key=value
-	for i, k := range keys {
+	// Format fields as key=value in insertion order
+	for i, pair := range e.Fields {
 		if i > 0 {
 			b.WriteString(lx.Space)
 		}
-		b.WriteString(k)
+		b.WriteString(pair.Key)
 		b.WriteString("=")
-		b.WriteString(fmt.Sprint(e.Fields[k]))
+		b.WriteString(fmt.Sprint(pair.Value))
 	}
 	b.WriteString(lx.RightBracket)
 }

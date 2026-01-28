@@ -135,22 +135,31 @@ func LevelParse(s string) LevelType {
 // ([parent]→[child]) styles, affecting how handlers render namespace hierarchies.
 type StyleType int
 
+// Pair represents a key-value pair where the key is a string and the value is of any type.
+type Pair struct {
+	Key   string
+	Value interface{}
+}
+
+// Fields represents a slice of key-value pairs.
+type Fields []Pair
+
 // Entry represents a single log entry passed to handlers.
 // It encapsulates all information about a log message, including its timestamp, severity,
 // content, namespace, metadata, and formatting style. Handlers process Entry instances
 // to produce formatted output (e.g., text, JSON). The struct is immutable once created,
 // ensuring thread-safety in handler processing.
 type Entry struct {
-	Timestamp time.Time              // Time the log was created
-	Level     LevelType              // Severity level of the log (Debug, Info, Warn, Error, None)
-	Message   string                 // Log message content
-	Namespace string                 // Namespace path (e.g., "parent/child")
-	Fields    map[string]interface{} // Additional key-value metadata (e.g., {"user": "alice"})
-	Style     StyleType              // Namespace formatting style (FlatPath or NestedPath)
-	Error     error                  // Associated error, if any (e.g., for error logs)
-	Class     ClassType              // Type of log entry (Text, JSON, Dump, Special, Raw)
-	Stack     []byte                 // Stack trace data (if present)
-	Id        int                    `json:"-"` // Unique ID for the entry, ignored in JSON output
+	Timestamp time.Time // Time the log was created
+	Level     LevelType // Severity level of the log (Debug, Info, Warn, Error, None)
+	Message   string    // Log message content
+	Namespace string    // Namespace path (e.g., "parent/child")
+	Fields    Fields    // Additional key-value metadata (e.g., {"user": "alice"})
+	Style     StyleType // Namespace formatting style (FlatPath or NestedPath)
+	Error     error     // Associated error, if any (e.g., for error logs)
+	Class     ClassType // Type of log entry (Text, JSON, Dump, Special, Raw)
+	Stack     []byte    // Stack trace data (if present)
+	Id        int       `json:"-"` // Unique ID for the entry, ignored in JSON output
 }
 
 // Handler defines the interface for processing log entries.

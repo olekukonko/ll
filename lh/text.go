@@ -3,7 +3,6 @@ package lh
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -153,24 +152,18 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 	builder.WriteString(lx.Space)
 	builder.WriteString(e.Message)
 
-	// Add fields in sorted order
+	// Add fields in order (no sorting - preserving insertion order)
 	if len(e.Fields) > 0 {
-		var keys []string
-		for k := range e.Fields {
-			keys = append(keys, k)
-		}
-		// Sort keys for consistent output
-		sort.Strings(keys)
 		builder.WriteString(lx.Space)
 		builder.WriteString(lx.LeftBracket)
-		for i, k := range keys {
+		for i, pair := range e.Fields {
 			if i > 0 {
 				builder.WriteString(lx.Space)
 			}
 			// Format field as key=value
-			builder.WriteString(k)
+			builder.WriteString(pair.Key)
 			builder.WriteString("=")
-			builder.WriteString(fmt.Sprint(e.Fields[k]))
+			builder.WriteString(fmt.Sprint(pair.Value))
 		}
 		builder.WriteString(lx.RightBracket)
 	}

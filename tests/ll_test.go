@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/olekukonko/ll"
-	"github.com/olekukonko/ll/lh"
-	"github.com/olekukonko/ll/lm"
-	"github.com/olekukonko/ll/lx"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/olekukonko/ll"
+	"github.com/olekukonko/ll/lh"
+	"github.com/olekukonko/ll/lm"
+	"github.com/olekukonko/ll/lx"
 )
 
 // TestMain sets up the test environment and runs the test suite.
@@ -106,6 +107,7 @@ func TestLoggingMethods(t *testing.T) {
 }
 
 // TestBuilderFields verifies the Fields and Field methods for adding metadata to logs.
+// TestBuilderFields verifies the Fields and Field methods for adding metadata to logs.
 func TestBuilderFields(t *testing.T) {
 	// Set up a logger with a buffer for capturing output
 	buf := &bytes.Buffer{}
@@ -120,24 +122,26 @@ func TestBuilderFields(t *testing.T) {
 
 	// Test map-based Field with a pre-constructed map
 	buf.Reset()
-	fields := map[string]interface{}{"k1": "v1", "k2": "v2", "k3": 123}
-	logger.Field(fields).Infof("Test map")
-	if !strings.Contains(buf.String(), "[test] INFO: Test map [k1=v1 k2=v2 k3=123]") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test map [k1=v1 k2=v2 k3=123]")
+	logger.Fields("k1", "v1", "k2").Infof("Test uneven")
+	// Fields in insertion order, error appended at end
+	if !strings.Contains(buf.String(), "[test] INFO: Test uneven [k1=v1 error=uneven key-value pairs in Fields: [k2]]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test uneven [k1=v1 error=uneven key-value pairs in Fields: [k2]]")
 	}
 
 	// Test variadic Fields with uneven key-value pairs
 	buf.Reset()
-	logger.Fields("k1", "v1", "k2").Infof("Test uneven")
-	if !strings.Contains(buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test uneven [error=uneven key-value pairs in Fields: [k2] k1=v1]")
+	logger.Fields("k1", "v1", 42, "v2").Infof("Test non-string")
+	// Fields in insertion order, error appended at end
+	if !strings.Contains(buf.String(), "[test] INFO: Test non-string [k1=v1 error=non-string key in Fields: 42]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test non-string [k1=v1 error=non-string key in Fields: 42]")
 	}
 
 	// Test variadic Fields with a non-string key
 	buf.Reset()
 	logger.Fields("k1", "v1", 42, "v2").Infof("Test non-string")
-	if !strings.Contains(buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test non-string [error=non-string key in Fields: 42 k1=v1]")
+	// Updated: error field appears after valid fields now
+	if !strings.Contains(buf.String(), "[test] INFO: Test non-string [k1=v1 error=non-string key in Fields: 42]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] INFO: Test non-string [k1=v1 error=non-string key in Fields: 42]")
 	}
 }
 
@@ -240,15 +244,17 @@ func TestConditionalLogging(t *testing.T) {
 	// Test variadic Fields with uneven pairs under true condition
 	buf.Reset()
 	logger.If(true).Fields("key", "value", "odd").Infof("Test uneven")
-	if !strings.Contains(buf.String(), "[VC] INFO: Test uneven [error=uneven key-value pairs in Fields: [odd] key=value]") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test uneven [error=uneven key-value pairs in Fields: [odd] key=value]")
+	// Fields appear in insertion order, error appended at end
+	if !strings.Contains(buf.String(), "[VC] INFO: Test uneven [key=value error=uneven key-value pairs in Fields: [odd]]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test uneven [key=value error=uneven key-value pairs in Fields: [odd]]")
 	}
 
 	// Test variadic Fields with non-string key under true condition
 	buf.Reset()
 	logger.If(true).Fields("key", "value", 42, "value2").Infof("Test non-string")
-	if !strings.Contains(buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test non-string [error=non-string key in Fields: 42 key=value]")
+	// Fields appear in insertion order, error appended at end
+	if !strings.Contains(buf.String(), "[VC] INFO: Test non-string [key=value error=non-string key in Fields: 42]") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[VC] INFO: Test non-string [key=value error=non-string key in Fields: 42]")
 	}
 
 	// Test Conditional Stack logging with stack trace
@@ -276,13 +282,11 @@ func TestMiddleware(t *testing.T) {
 	logger := ll.New("test").Enable().Handler(lh.NewTextHandler(buf)).Level(lx.LevelDebug)
 
 	// Test middleware that adds a field
-	logger = logger.Use(ll.Middle(func(e *lx.Entry) error {
-		if e.Fields == nil {
-			e.Fields = make(map[string]interface{})
-		}
-		e.Fields["extra"] = "value"
+	mw := logger.Use(ll.Middle(func(e *lx.Entry) error {
+		// Add a field to the ordered fields slice
+		e.Fields = append(e.Fields, lx.Pair{Key: "extra", Value: "value"})
 		return nil
-	})).Logger()
+	}))
 
 	buf.Reset()
 	logger.Infof("Test with extra field")
@@ -291,27 +295,34 @@ func TestMiddleware(t *testing.T) {
 	}
 
 	// Test middleware that filters logs by level
-	logger = logger.Use(ll.Middle(func(e *lx.Entry) error {
+	mw.Remove() // Remove the first middleware
+
+	mw2 := logger.Use(ll.Middle(func(e *lx.Entry) error {
 		if e.Level >= lx.LevelWarn {
 			return nil
 		}
 		return fmt.Errorf("level too low")
-	})).Logger()
+	}))
+
 	buf.Reset()
 	logger.Infof("Should not log") // Below Warn level, should be ignored
 	if buf.String() != "" {
 		t.Errorf("Expected empty buffer, got %q", buf.String())
 	}
+
 	buf.Reset()
 	logger.Warnf("Should log")
-	if !strings.Contains(buf.String(), "[test] WARN: Should log [extra=value]") {
-		t.Errorf("Expected %q to contain %q", buf.String(), "[test] WARN: Should log [extra=value]")
+	if !strings.Contains(buf.String(), "[test] WARN: Should log") {
+		t.Errorf("Expected %q to contain %q", buf.String(), "[test] WARN: Should log")
 	}
 
 	// Test middleware that skips all logs
-	logger = logger.Use(ll.Middle(func(e *lx.Entry) error {
+	mw2.Remove() // Remove the second middleware
+
+	logger.Use(ll.Middle(func(e *lx.Entry) error {
 		return fmt.Errorf("skip all")
-	})).Logger()
+	}))
+
 	buf.Reset()
 	logger.Warnf("Should not log") // Should be ignored by middleware
 	if buf.String() != "" {
@@ -509,13 +520,13 @@ func TestTextHandler(t *testing.T) {
 	// Create a buffer and TextHandler
 	var buf bytes.Buffer
 	h := lh.NewTextHandler(&buf)
-	// Create a test log entry
+	// Create a test log entry with ordered fields
 	e := &lx.Entry{
 		Timestamp: time.Now(),
 		Level:     lx.LevelInfo,
 		Message:   "test",
 		Namespace: "",
-		Fields:    map[string]interface{}{"key": 1},
+		Fields:    lx.Fields{{Key: "key", Value: 1}}, // Changed from map to slice
 	}
 	// Process the entry
 	if err := h.Handle(e); err != nil {

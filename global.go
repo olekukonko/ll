@@ -18,7 +18,7 @@ var defaultLogger = &Logger{
 	enabled:         true,                         // Initially enabled
 	level:           lx.LevelDebug,                // Minimum log level set to Debug
 	namespaces:      defaultStore,                 // Shared namespace store for enable/disable states
-	context:         make(map[string]interface{}), // Empty context for global fields
+	context:         make(lx.Fields, 0, 10),       // Empty context for global fields
 	style:           lx.FlatPath,                  // Flat namespace style (e.g., [parent/child])
 	handler:         lh.NewTextHandler(os.Stdout), // Default text handler to os.Stdout
 	middleware:      make([]Middleware, 0),        // Empty middleware chain
