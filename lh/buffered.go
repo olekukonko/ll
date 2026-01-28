@@ -173,18 +173,25 @@ func (b *Buffered[H]) Flush() {
 
 // Close flushes any remaining entries and stops the worker.
 // It ensures shutdown is performed only once and waits for the worker to finish.
+// If the underlying handler implements a Close() error method, it will be called to release resources.
 // Thread-safe via sync.Once and WaitGroup.
-// Returns nil as it does not produce errors.
+// Returns any error from the underlying handler's Close, or nil.
 // Example:
 //
 //	buffered.Close() // Flushes entries and stops worker
 func (b *Buffered[H]) Close() error {
+	var closeErr error
 	b.shutdownOnce.Do(func() {
 		close(b.shutdown)            // Signal worker to shut down
 		b.wg.Wait()                  // Wait for worker to finish
 		runtime.SetFinalizer(b, nil) // Remove finalizer
+
+		// Check if underlying handler has a Close method and call it
+		if closer, ok := any(b.handler).(interface{ Close() error }); ok {
+			closeErr = closer.Close()
+		}
 	})
-	return nil
+	return closeErr
 }
 
 // Final ensures remaining entries are flushed during garbage collection.
