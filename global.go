@@ -233,14 +233,23 @@ func Panicf(format string, args ...any) {
 }
 
 // If creates a conditional logger that logs only if the condition is true using the default logger.
-// It returns a Conditional struct that wraps the default logger, enabling conditional logging methods.
-// Thread-safe via the Logger’s mutex.
-// Example:
-//
-//	ll.If(true).Info("Logged")   // Output: [] INFO: Logged
-//	ll.If(false).Info("Ignored") // No output
 func If(condition bool) *Conditional {
 	return defaultLogger.If(condition)
+}
+
+// IfErr creates a conditional logger that logs only if the error is non-nil using the default logger.
+func IfErr(err error) *Conditional {
+	return defaultLogger.IfErr(err)
+}
+
+// IfErrAny creates a conditional logger that logs only if AT LEAST ONE error is non-nil using the default logger.
+func IfErrAny(errs ...error) *Conditional {
+	return defaultLogger.IfErrAny(errs...)
+}
+
+// IfErrOne creates a conditional logger that logs only if ALL errors are non-nil using the default logger.
+func IfErrOne(errs ...error) *Conditional {
+	return defaultLogger.IfErrOne(errs...)
 }
 
 // Context creates a new logger with additional contextual fields using the default logger.
