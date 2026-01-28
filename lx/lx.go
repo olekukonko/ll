@@ -135,15 +135,6 @@ func LevelParse(s string) LevelType {
 // ([parent]→[child]) styles, affecting how handlers render namespace hierarchies.
 type StyleType int
 
-// Pair represents a key-value pair where the key is a string and the value is of any type.
-type Pair struct {
-	Key   string
-	Value interface{}
-}
-
-// Fields represents a slice of key-value pairs.
-type Fields []Pair
-
 // Entry represents a single log entry passed to handlers.
 // It encapsulates all information about a log message, including its timestamp, severity,
 // content, namespace, metadata, and formatting style. Handlers process Entry instances
