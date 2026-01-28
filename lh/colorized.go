@@ -321,7 +321,7 @@ func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 	b.WriteString(h.palette.Reset)
 	b.WriteString("\n")
 
-	// Pair function name and file path lines
+	// Field function name and file path lines
 	for i := 1; i < len(lines)-1; i += 2 {
 		funcLine := strings.TrimSpace(lines[i])
 		pathLine := strings.TrimSpace(lines[i+1])

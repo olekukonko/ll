@@ -284,7 +284,7 @@ func TestMiddleware(t *testing.T) {
 	// Test middleware that adds a field
 	mw := logger.Use(ll.Middle(func(e *lx.Entry) error {
 		// Add a field to the ordered fields slice
-		e.Fields = append(e.Fields, lx.Pair{Key: "extra", Value: "value"})
+		e.Fields = append(e.Fields, lx.Field{Key: "extra", Value: "value"})
 		return nil
 	}))
 

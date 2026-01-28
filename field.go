@@ -337,10 +337,10 @@ func (fb *FieldBuilder) Err(errs ...error) *FieldBuilder {
 	if count > 0 {
 		if count == 1 {
 			// Store single error directly
-			fb.fields = append(fb.fields, lx.Pair{Key: "error", Value: nonNilErrors[0]})
+			fb.fields = append(fb.fields, lx.Field{Key: "error", Value: nonNilErrors[0]})
 		} else {
 			// Store slice of errors
-			fb.fields = append(fb.fields, lx.Pair{Key: "error", Value: nonNilErrors})
+			fb.fields = append(fb.fields, lx.Field{Key: "error", Value: nonNilErrors})
 		}
 		// Log concatenated error messages at Error level
 		fb.logger.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
@@ -368,10 +368,10 @@ func (fb *FieldBuilder) Merge(pairs ...any) *FieldBuilder {
 	for i := 0; i < len(pairs)-1; i += 2 {
 		// Ensure the key is a string
 		if key, ok := pairs[i].(string); ok {
-			fb.fields = append(fb.fields, lx.Pair{Key: key, Value: pairs[i+1]})
+			fb.fields = append(fb.fields, lx.Field{Key: key, Value: pairs[i+1]})
 		} else {
 			// Log an error field for non-string keys
-			fb.fields = append(fb.fields, lx.Pair{
+			fb.fields = append(fb.fields, lx.Field{
 				Key:   "error",
 				Value: fmt.Errorf("non-string key in Merge: %v", pairs[i]),
 			})
@@ -379,7 +379,7 @@ func (fb *FieldBuilder) Merge(pairs ...any) *FieldBuilder {
 	}
 	// Check for uneven pairs (missing value)
 	if len(pairs)%2 != 0 {
-		fb.fields = append(fb.fields, lx.Pair{
+		fb.fields = append(fb.fields, lx.Field{
 			Key:   "error",
 			Value: fmt.Errorf("uneven key-value pairs in Merge: [%v]", pairs[len(pairs)-1]),
 		})

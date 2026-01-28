@@ -5,14 +5,14 @@ import (
 	"strings"
 )
 
-// Pair represents a key-value pair where the key is a string and the value is of any type.
-type Pair struct {
+// Field represents a key-value pair where the key is a string and the value is of any type.
+type Field struct {
 	Key   string
 	Value interface{}
 }
 
 // Fields represents a slice of key-value pairs.
-type Fields []Pair
+type Fields []Field
 
 // Map converts the Fields slice to a map[string]interface{}.
 // This is useful for backward compatibility or when map operations are needed.
@@ -74,7 +74,7 @@ func (f Fields) Translate(mapping map[string]string) Fields {
 	result := make(Fields, len(f))
 	for i, pair := range f {
 		if newKey, ok := mapping[pair.Key]; ok {
-			result[i] = Pair{Key: newKey, Value: pair.Value}
+			result[i] = Field{Key: newKey, Value: pair.Value}
 		} else {
 			result[i] = pair
 		}

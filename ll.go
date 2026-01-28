@@ -122,7 +122,7 @@ func (l *Logger) AddContext(pairs ...any) *Logger {
 
 	for i := 0; i < len(pairs)-1; i += 2 {
 		if key, ok := pairs[i].(string); ok {
-			l.context = append(l.context, lx.Pair{Key: key, Value: pairs[i+1]})
+			l.context = append(l.context, lx.Field{Key: key, Value: pairs[i+1]})
 		}
 	}
 	return l
@@ -234,7 +234,7 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 
 	// Add new fields from map
 	for k, v := range fields {
-		newLogger.context = append(newLogger.context, lx.Pair{Key: k, Value: v})
+		newLogger.context = append(newLogger.context, lx.Field{Key: k, Value: v})
 	}
 
 	return newLogger
@@ -515,10 +515,10 @@ func (l *Logger) Err(errs ...error) {
 	if count > 0 {
 		if count == 1 {
 			// Store single error directly
-			l.context = append(l.context, lx.Pair{Key: "error", Value: nonNilErrors[0]})
+			l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors[0]})
 		} else {
 			// Store slice of errors
-			l.context = append(l.context, lx.Pair{Key: "error", Value: nonNilErrors})
+			l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors})
 		}
 		// Log concatenated error messages
 		l.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
@@ -611,7 +611,7 @@ func (l *Logger) Field(fields map[string]interface{}) *FieldBuilder {
 
 	// Copy fields from input map to FieldBuilder (preserving map iteration order)
 	for k, v := range fields {
-		fb.fields = append(fb.fields, lx.Pair{Key: k, Value: v})
+		fb.fields = append(fb.fields, lx.Field{Key: k, Value: v})
 	}
 	return fb
 }
@@ -632,10 +632,10 @@ func (l *Logger) Fields(pairs ...any) *FieldBuilder {
 	// Process key-value pairs
 	for i := 0; i < len(pairs)-1; i += 2 {
 		if key, ok := pairs[i].(string); ok {
-			fb.fields = append(fb.fields, lx.Pair{Key: key, Value: pairs[i+1]})
+			fb.fields = append(fb.fields, lx.Field{Key: key, Value: pairs[i+1]})
 		} else {
 			// Log error for non-string keys
-			fb.fields = append(fb.fields, lx.Pair{
+			fb.fields = append(fb.fields, lx.Field{
 				Key:   "error",
 				Value: fmt.Errorf("non-string key in Fields: %v", pairs[i]),
 			})
@@ -643,7 +643,7 @@ func (l *Logger) Fields(pairs ...any) *FieldBuilder {
 	}
 	// Log error for uneven pairs
 	if len(pairs)%2 != 0 {
-		fb.fields = append(fb.fields, lx.Pair{
+		fb.fields = append(fb.fields, lx.Field{
 			Key:   "error",
 			Value: fmt.Errorf("uneven key-value pairs in Fields: [%v]", pairs[len(pairs)-1]),
 		})
