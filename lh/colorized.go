@@ -24,14 +24,12 @@ const (
 )
 
 // Palette defines ANSI color codes for various log components.
-// It specifies colors for headers, goroutines, functions, paths, stack traces, and log levels,
-// used by ColorizedHandler to format log output with color.
 type Palette struct {
 	Header    string // Color for stack trace header and dump separators
 	Goroutine string // Color for goroutine lines in stack traces
 	Func      string // Color for function names in stack traces
 	Path      string // Color for file paths in stack traces
-	FileLine  string // Color for file line numbers (not used in provided code)
+	FileLine  string // Color for file line numbers
 	Reset     string // Reset code to clear color formatting
 	Pos       string // Color for position in hex dumps
 	Hex       string // Color for hex values in dumps
@@ -43,7 +41,7 @@ type Palette struct {
 	Fatal     string // Color for Fatal level messages
 	Title     string // Color for dump titles (BEGIN/END separators)
 
-	// New field type colors
+	// Field type colors
 	Key     string // Color for field keys
 	Number  string // Color for numbers
 	String  string // Color for strings
@@ -51,184 +49,213 @@ type Palette struct {
 	Time    string // Color for timestamps/durations
 	Nil     string // Color for nil values
 	Default string // Default color for unknown types
+
+	// JSON and Inspect specific colors
+	JSONKey      string // Color for JSON keys
+	JSONString   string // Color for JSON string values
+	JSONNumber   string // Color for JSON number values
+	JSONBool     string // Color for JSON boolean values
+	JSONNull     string // Color for JSON null values
+	JSONBrace    string // Color for JSON braces and brackets
+	InspectKey   string // Color for inspect keys
+	InspectValue string // Color for inspect values
+	InspectMeta  string // Color for inspect metadata (annotations)
 }
 
 // darkPalette defines colors optimized for dark terminal backgrounds.
-// It uses bright, contrasting colors for readability on dark backgrounds.
 var darkPalette = Palette{
-	Header:    "\033[1;31m",     // Bold red for headers
-	Goroutine: "\033[1;36m",     // Bold cyan for goroutines
-	Func:      "\033[97m",       // Bright white for functions
-	Path:      "\033[38;5;245m", // Light gray for paths
-	FileLine:  "\033[38;5;111m", // Muted light blue (unused)
-	Reset:     "\033[0m",        // Reset color formatting
+	Header:    "\033[1;31m",
+	Goroutine: "\033[1;36m",
+	Func:      "\033[97m",
+	Path:      "\033[38;5;245m",
+	FileLine:  "\033[38;5;111m",
+	Reset:     "\033[0m",
+	Title:     "\033[38;5;245m",
+	Pos:       "\033[38;5;117m",
+	Hex:       "\033[38;5;156m",
+	Ascii:     "\033[38;5;224m",
+	Debug:     "\033[36m",
+	Info:      "\033[32m",
+	Warn:      "\033[33m",
+	Error:     "\033[31m",
+	Fatal:     "\033[1;31m",
 
-	Title: "\033[38;5;245m", // Light gray for dump titles
-	Pos:   "\033[38;5;117m", // Light blue for dump positions
-	Hex:   "\033[38;5;156m", // Light green for hex values
-	Ascii: "\033[38;5;224m", // Light pink for ASCII values
+	// Field type colors
+	Key:     "\033[38;5;117m",
+	Number:  "\033[38;5;141m",
+	String:  "\033[38;5;223m",
+	Bool:    "\033[38;5;85m",
+	Time:    "\033[38;5;110m",
+	Nil:     "\033[38;5;243m",
+	Default: "\033[38;5;250m",
 
-	Debug: "\033[36m",   // Cyan for Debug level
-	Info:  "\033[32m",   // Green for Info level
-	Warn:  "\033[33m",   // Yellow for Warn level
-	Error: "\033[31m",   // Standard red
-	Fatal: "\033[1;31m", // Bold red - stands out more
-
-	// New colors for field types
-	Key:     "\033[38;5;117m", // Light blue for keys
-	Number:  "\033[38;5;141m", // Purple for numbers
-	String:  "\033[38;5;223m", // Light orange for strings
-	Bool:    "\033[38;5;85m",  // Green for booleans
-	Time:    "\033[38;5;110m", // Blue for timestamps
-	Nil:     "\033[38;5;243m", // Gray for nil
-	Default: "\033[38;5;250m", // Default light gray
+	// JSON and Inspect colors
+	JSONKey:      "\033[38;5;117m",
+	JSONString:   "\033[38;5;223m",
+	JSONNumber:   "\033[38;5;141m",
+	JSONBool:     "\033[38;5;85m",
+	JSONNull:     "\033[38;5;243m",
+	JSONBrace:    "\033[38;5;245m",
+	InspectKey:   "\033[38;5;117m",
+	InspectValue: "\033[38;5;223m",
+	InspectMeta:  "\033[38;5;243m",
 }
 
 // lightPalette defines colors optimized for light terminal backgrounds.
-// It uses darker colors for better contrast on light backgrounds.
 var lightPalette = Palette{
-	Header:    "\033[1;31m", // Same red for headers
-	Goroutine: "\033[34m",   // Blue (darker for light bg)
-	Func:      "\033[30m",   // Black text for functions
-	Path:      "\033[90m",   // Dark gray for paths
-	FileLine:  "\033[94m",   // Blue for file lines (unused)
-	Reset:     "\033[0m",    // Reset color formatting
+	Header:    "\033[1;31m",
+	Goroutine: "\033[34m",
+	Func:      "\033[30m",
+	Path:      "\033[90m",
+	FileLine:  "\033[94m",
+	Reset:     "\033[0m",
+	Title:     "\033[38;5;245m",
+	Pos:       "\033[38;5;117m",
+	Hex:       "\033[38;5;156m",
+	Ascii:     "\033[38;5;224m",
+	Debug:     "\033[36m",
+	Info:      "\033[32m",
+	Warn:      "\033[33m",
+	Error:     "\033[31m",
+	Fatal:     "\033[1;31m",
 
-	Title: "\033[38;5;245m", // Light gray for dump titles
-	Pos:   "\033[38;5;117m", // Light blue for dump positions
-	Hex:   "\033[38;5;156m", // Light green for hex values
-	Ascii: "\033[38;5;224m", // Light pink for ASCII values
+	Key:     "\033[34m",
+	Number:  "\033[35m",
+	String:  "\033[38;5;94m",
+	Bool:    "\033[32m",
+	Time:    "\033[38;5;24m",
+	Nil:     "\033[38;5;240m",
+	Default: "\033[30m",
 
-	Debug: "\033[36m",   // Cyan for Debug level
-	Info:  "\033[32m",   // Green for Info level
-	Warn:  "\033[33m",   // Yellow for Warn level
-	Error: "\033[31m",   // Standard red
-	Fatal: "\033[1;31m", // Bold red - stands out more
-
-	// New colors for field types (darker for light background)
-	Key:     "\033[34m",       // Blue for keys
-	Number:  "\033[35m",       // Magenta for numbers
-	String:  "\033[38;5;94m",  // Dark orange/brown for strings
-	Bool:    "\033[32m",       // Green for booleans
-	Time:    "\033[38;5;24m",  // Dark blue for timestamps
-	Nil:     "\033[38;5;240m", // Dark gray for nil
-	Default: "\033[30m",       // Black for unknown types
+	JSONKey:      "\033[34m",
+	JSONString:   "\033[38;5;94m",
+	JSONNumber:   "\033[35m",
+	JSONBool:     "\033[32m",
+	JSONNull:     "\033[38;5;240m",
+	JSONBrace:    "\033[38;5;240m",
+	InspectKey:   "\033[34m",
+	InspectValue: "\033[38;5;94m",
+	InspectMeta:  "\033[38;5;240m",
 }
 
 // brightPalette defines vibrant, high-contrast colors
 var brightPalette = Palette{
-	Header:    "\033[1;91m",     // Bright bold red
-	Goroutine: "\033[1;96m",     // Bright bold cyan
-	Func:      "\033[1;97m",     // Bright bold white
-	Path:      "\033[38;5;250m", // Bright gray
-	FileLine:  "\033[38;5;117m", // Bright blue
+	Header:    "\033[1;91m",
+	Goroutine: "\033[1;96m",
+	Func:      "\033[1;97m",
+	Path:      "\033[38;5;250m",
+	FileLine:  "\033[38;5;117m",
 	Reset:     "\033[0m",
+	Title:     "\033[1;37m",
+	Pos:       "\033[1;33m",
+	Hex:       "\033[1;32m",
+	Ascii:     "\033[1;35m",
+	Debug:     "\033[1;36m",
+	Info:      "\033[1;32m",
+	Warn:      "\033[1;33m",
+	Error:     "\033[1;31m",
+	Fatal:     "\033[1;91m",
 
-	Title: "\033[1;37m", // Bright white
-	Pos:   "\033[1;33m", // Bright yellow
-	Hex:   "\033[1;32m", // Bright green
-	Ascii: "\033[1;35m", // Bright magenta
+	Key:     "\033[1;34m",
+	Number:  "\033[1;35m",
+	String:  "\033[1;33m",
+	Bool:    "\033[1;32m",
+	Time:    "\033[1;36m",
+	Nil:     "\033[1;37m",
+	Default: "\033[1;37m",
 
-	Debug: "\033[1;36m", // Bright cyan
-	Info:  "\033[1;32m", // Bright green
-	Warn:  "\033[1;33m", // Bright yellow
-	Error: "\033[1;31m", // Bright red
-	Fatal: "\033[1;91m", // Bright bold red
-
-	// Bright field type colors
-	Key:     "\033[1;34m", // Bright blue
-	Number:  "\033[1;35m", // Bright magenta
-	String:  "\033[1;33m", // Bright yellow
-	Bool:    "\033[1;32m", // Bright green
-	Time:    "\033[1;36m", // Bright cyan
-	Nil:     "\033[1;37m", // Bright white
-	Default: "\033[1;37m", // Bright white
+	JSONKey:      "\033[1;34m",
+	JSONString:   "\033[1;33m",
+	JSONNumber:   "\033[1;35m",
+	JSONBool:     "\033[1;32m",
+	JSONNull:     "\033[1;37m",
+	JSONBrace:    "\033[1;37m",
+	InspectKey:   "\033[1;34m",
+	InspectValue: "\033[1;33m",
+	InspectMeta:  "\033[1;37m",
 }
 
 // pastelPalette defines soft, pastel colors
 var pastelPalette = Palette{
-	Header:    "\033[38;5;211m", // Pastel red
-	Goroutine: "\033[38;5;153m", // Pastel blue
-	Func:      "\033[38;5;255m", // Off-white
-	Path:      "\033[38;5;248m", // Light gray
-	FileLine:  "\033[38;5;111m", // Pastel blue
+	Header:    "\033[38;5;211m",
+	Goroutine: "\033[38;5;153m",
+	Func:      "\033[38;5;255m",
+	Path:      "\033[38;5;248m",
+	FileLine:  "\033[38;5;111m",
 	Reset:     "\033[0m",
+	Title:     "\033[38;5;248m",
+	Pos:       "\033[38;5;153m",
+	Hex:       "\033[38;5;158m",
+	Ascii:     "\033[38;5;218m",
+	Debug:     "\033[38;5;122m",
+	Info:      "\033[38;5;120m",
+	Warn:      "\033[38;5;221m",
+	Error:     "\033[38;5;211m",
+	Fatal:     "\033[38;5;204m",
 
-	Title: "\033[38;5;248m", // Light gray
-	Pos:   "\033[38;5;153m", // Pastel blue
-	Hex:   "\033[38;5;158m", // Pastel green
-	Ascii: "\033[38;5;218m", // Pastel pink
+	Key:     "\033[38;5;153m",
+	Number:  "\033[38;5;183m",
+	String:  "\033[38;5;223m",
+	Bool:    "\033[38;5;120m",
+	Time:    "\033[38;5;117m",
+	Nil:     "\033[38;5;247m",
+	Default: "\033[38;5;250m",
 
-	Debug: "\033[38;5;122m", // Pastel cyan
-	Info:  "\033[38;5;120m", // Pastel green
-	Warn:  "\033[38;5;221m", // Pastel yellow
-	Error: "\033[38;5;211m", // Pastel red
-	Fatal: "\033[38;5;204m", // Brighter pastel red
-
-	// Pastel field type colors
-	Key:     "\033[38;5;153m", // Pastel blue
-	Number:  "\033[38;5;183m", // Pastel purple
-	String:  "\033[38;5;223m", // Pastel orange
-	Bool:    "\033[38;5;120m", // Pastel green
-	Time:    "\033[38;5;117m", // Pastel blue
-	Nil:     "\033[38;5;247m", // Pastel gray
-	Default: "\033[38;5;250m", // Pastel light gray
+	JSONKey:      "\033[38;5;153m",
+	JSONString:   "\033[38;5;223m",
+	JSONNumber:   "\033[38;5;183m",
+	JSONBool:     "\033[38;5;120m",
+	JSONNull:     "\033[38;5;247m",
+	JSONBrace:    "\033[38;5;247m",
+	InspectKey:   "\033[38;5;153m",
+	InspectValue: "\033[38;5;223m",
+	InspectMeta:  "\033[38;5;247m",
 }
 
 // vibrantPalette defines highly saturated, eye-catching colors
 var vibrantPalette = Palette{
-	Header:    "\033[38;5;196m", // Vivid red
-	Goroutine: "\033[38;5;51m",  // Vivid cyan
-	Func:      "\033[38;5;15m",  // Pure white
-	Path:      "\033[38;5;244m", // Medium gray
-	FileLine:  "\033[38;5;75m",  // Vivid blue
+	Header:    "\033[38;5;196m",
+	Goroutine: "\033[38;5;51m",
+	Func:      "\033[38;5;15m",
+	Path:      "\033[38;5;244m",
+	FileLine:  "\033[38;5;75m",
 	Reset:     "\033[0m",
+	Title:     "\033[38;5;244m",
+	Pos:       "\033[38;5;51m",
+	Hex:       "\033[38;5;46m",
+	Ascii:     "\033[38;5;201m",
+	Debug:     "\033[38;5;51m",
+	Info:      "\033[38;5;46m",
+	Warn:      "\033[38;5;226m",
+	Error:     "\033[38;5;196m",
+	Fatal:     "\033[1;38;5;196m",
 
-	Title: "\033[38;5;244m", // Medium gray
-	Pos:   "\033[38;5;51m",  // Vivid cyan
-	Hex:   "\033[38;5;46m",  // Vivid green
-	Ascii: "\033[38;5;201m", // Vivid magenta
+	Key:     "\033[38;5;33m",
+	Number:  "\033[38;5;129m",
+	String:  "\033[38;5;214m",
+	Bool:    "\033[38;5;46m",
+	Time:    "\033[38;5;75m",
+	Nil:     "\033[38;5;242m",
+	Default: "\033[38;5;15m",
 
-	Debug: "\033[38;5;51m",    // Vivid cyan
-	Info:  "\033[38;5;46m",    // Vivid green
-	Warn:  "\033[38;5;226m",   // Vivid yellow
-	Error: "\033[38;5;196m",   // Vivid red
-	Fatal: "\033[1;38;5;196m", // Bold vivid red
-
-	// Vibrant field type colors
-	Key:     "\033[38;5;33m",  // Vivid blue
-	Number:  "\033[38;5;129m", // Vivid purple
-	String:  "\033[38;5;214m", // Vivid orange
-	Bool:    "\033[38;5;46m",  // Vivid green
-	Time:    "\033[38;5;75m",  // Vivid blue
-	Nil:     "\033[38;5;242m", // Dark gray
-	Default: "\033[38;5;15m",  // White
+	JSONKey:      "\033[38;5;33m",
+	JSONString:   "\033[38;5;214m",
+	JSONNumber:   "\033[38;5;129m",
+	JSONBool:     "\033[38;5;46m",
+	JSONNull:     "\033[38;5;242m",
+	JSONBrace:    "\033[38;5;242m",
+	InspectKey:   "\033[38;5;33m",
+	InspectValue: "\033[38;5;214m",
+	InspectMeta:  "\033[38;5;242m",
 }
 
 // noColorPalette defines a palette with empty strings for environments without color support
 var noColorPalette = Palette{
-	Header:    "",
-	Goroutine: "",
-	Func:      "",
-	Path:      "",
-	FileLine:  "",
-	Reset:     "",
-	Title:     "",
-	Pos:       "",
-	Hex:       "",
-	Ascii:     "",
-	Debug:     "",
-	Info:      "",
-	Warn:      "",
-	Error:     "",
-	Fatal:     "",
-	Key:       "",
-	Number:    "",
-	String:    "",
-	Bool:      "",
-	Time:      "",
-	Nil:       "",
-	Default:   "",
+	Header: "", Goroutine: "", Func: "", Path: "", FileLine: "", Reset: "",
+	Title: "", Pos: "", Hex: "", Ascii: "", Debug: "", Info: "", Warn: "", Error: "", Fatal: "",
+	Key: "", Number: "", String: "", Bool: "", Time: "", Nil: "", Default: "",
+	JSONKey: "", JSONString: "", JSONNumber: "", JSONBool: "", JSONNull: "", JSONBrace: "",
+	InspectKey: "", InspectValue: "", InspectMeta: "",
 }
 
 // builderPool is a pool of strings.Builder instances to reduce allocations
@@ -239,49 +266,34 @@ var builderPool = sync.Pool{
 }
 
 // ColorizedHandler is a handler that outputs log entries with ANSI color codes.
-// It formats log entries with colored namespace, level, message, fields, and stack traces,
-// writing the result to the provided writer.
-// Thread-safe if the underlying writer is thread-safe.
 type ColorizedHandler struct {
-	w          io.Writer // Destination for colored log output
-	palette    Palette   // Color scheme for formatting
-	showTime   bool      // Whether to display timestamps
-	timeFormat string    // Format for timestamps (defaults to time.RFC3339)
+	w          io.Writer
+	palette    Palette
+	showTime   bool
+	timeFormat string
 	mu         sync.Mutex
-	noColor    bool           // Whether to disable colors entirely
-	intensity  ColorIntensity // Color intensity level
+	noColor    bool
+	intensity  ColorIntensity
 }
 
 // ColorOption defines a configuration function for ColorizedHandler.
-// It allows customization of the handler, such as setting the color palette.
 type ColorOption func(*ColorizedHandler)
 
 // WithColorPallet sets the color palette for the ColorizedHandler.
-// It allows specifying a custom Palette for dark or light terminal backgrounds.
-// Example:
-//
-//	handler := NewColorizedHandler(os.Stdout, WithColorPallet(lightPalette))
 func WithColorPallet(pallet Palette) ColorOption {
 	return func(c *ColorizedHandler) {
 		c.palette = pallet
 	}
 }
 
-// WithNoColor disables all color output regardless of terminal capabilities.
-// This is useful for non-terminal outputs or when colors are not desired.
-// Example:
-//
-//	handler := NewColorizedHandler(os.Stdout, WithNoColor())
+// WithNoColor disables all color output.
 func WithNoColor() ColorOption {
 	return func(c *ColorizedHandler) {
 		c.noColor = true
 	}
 }
 
-// WithColorShowTime enables or disables the display of timestamps in colored log entries.
-// It controls whether the ColorizedHandler prepends a time string to its output,
-// providing temporal context while maintaining the handler's color formatting.
-// Setting show to true activates the timestamp prefix using the current time format.
+// WithColorShowTime enables or disables the display of timestamps.
 func WithColorShowTime(show bool) ColorOption {
 	return func(c *ColorizedHandler) {
 		c.showTime = show
@@ -289,10 +301,6 @@ func WithColorShowTime(show bool) ColorOption {
 }
 
 // WithColorIntensity sets the color intensity for the ColorizedHandler.
-// It allows choosing between Normal, Bright, Pastel, or Vibrant color schemes.
-// Example:
-//
-//	handler := NewColorizedHandler(os.Stdout, WithColorIntensity(IntensityBright))
 func WithColorIntensity(intensity ColorIntensity) ColorOption {
 	return func(c *ColorizedHandler) {
 		c.intensity = intensity
@@ -300,15 +308,7 @@ func WithColorIntensity(intensity ColorIntensity) ColorOption {
 }
 
 // NewColorizedHandler creates a new ColorizedHandler writing to the specified writer.
-// It initializes the handler with a detected or specified color palette and applies
-// optional configuration functions.
-// Example:
-//
-//	handler := NewColorizedHandler(os.Stdout)
-//	logger := ll.New("app").Enable().Handler(handler)
-//	logger.Info("Test") // Output: [app] <colored INFO>: Test
 func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
-	// Initialize with writer
 	c := &ColorizedHandler{
 		w:          w,
 		showTime:   false,
@@ -317,47 +317,35 @@ func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
 		intensity:  IntensityNormal,
 	}
 
-	// Apply configuration options
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	// Detect palette if not set
 	c.palette = c.detectPalette()
 	return c
 }
 
 // Handle processes a log entry and writes it with ANSI color codes.
-// It delegates to specialized methods based on the entry's class (Dump, Raw, or regular).
-// Returns an error if writing to the underlying writer fails.
-// Thread-safe if the writer is thread-safe.
-// Example:
-//
-//	handler.Handle(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes colored output
 func (h *ColorizedHandler) Handle(e *lx.Entry) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	switch e.Class {
 	case lx.ClassDump:
-		// Handle hex dump entries
 		return h.handleDumpOutput(e)
+	case lx.ClassJSON:
+		return h.handleJSONOutput(e)
+	case lx.ClassInspect:
+		return h.handleInspectOutput(e)
 	case lx.ClassRaw:
-		// Write raw entries directly
 		_, err := h.w.Write([]byte(e.Message))
 		return err
 	default:
-		// Handle standard log entries
 		return h.handleRegularOutput(e)
 	}
 }
 
-// Timestamped enables or disables timestamp display and optionally sets a custom time format.
-// If format is empty, defaults to RFC3339.
-// Example:
-//
-//	handler := NewColorizedHandler(os.Stdout).Timestamped(true, time.StampMilli)
-//	// Output: Jan 02 15:04:05.000 [app] INFO: Test
+// Timestamped enables or disables timestamp display.
 func (h *ColorizedHandler) Timestamped(enable bool, format ...string) {
 	h.showTime = enable
 	if len(format) > 0 && format[0] != "" {
@@ -366,54 +354,290 @@ func (h *ColorizedHandler) Timestamped(enable bool, format ...string) {
 }
 
 // handleRegularOutput handles normal log entries.
-// It formats the entry with colored namespace, level, message, fields, and stack trace (if present),
-// writing the result to the handler's writer.
-// Returns an error if writing fails.
-// Example (internal usage):
-//
-//	h.handleRegularOutput(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes colored output
 func (h *ColorizedHandler) handleRegularOutput(e *lx.Entry) error {
-	// Get a builder from pool
 	builder := builderPool.Get().(*strings.Builder)
 	builder.Reset()
 	defer builderPool.Put(builder)
 
-	// Add timestamp if enabled
 	if h.showTime {
 		builder.WriteString(e.Timestamp.Format(h.timeFormat))
 		builder.WriteString(lx.Space)
 	}
 
-	// Format namespace with colors
 	h.formatNamespace(builder, e)
-
-	// Format level with color based on severity
 	h.formatLevel(builder, e)
-
-	// Add message and fields
 	builder.WriteString(e.Message)
 	h.formatFields(builder, e)
 
-	// Format stack trace if present
 	if len(e.Stack) > 0 {
 		h.formatStack(builder, e.Stack)
 	}
 
-	// Append newline for non-None levels
 	if e.Level != lx.LevelNone {
 		builder.WriteString(lx.Newline)
 	}
 
-	// Write formatted output to writer
 	_, err := h.w.Write([]byte(builder.String()))
 	return err
 }
 
+// handleJSONOutput handles JSON log entries.
+func (h *ColorizedHandler) handleJSONOutput(e *lx.Entry) error {
+	builder := builderPool.Get().(*strings.Builder)
+	builder.Reset()
+	defer builderPool.Put(builder)
+
+	if h.showTime {
+		builder.WriteString(e.Timestamp.Format(h.timeFormat))
+		builder.WriteString(lx.Newline)
+	}
+
+	if e.Namespace != "" {
+		h.formatNamespace(builder, e)
+		h.formatLevel(builder, e)
+	}
+
+	h.colorizeJSON(builder, e.Message)
+	builder.WriteString(lx.Newline)
+
+	_, err := h.w.Write([]byte(builder.String()))
+	return err
+}
+
+// handleInspectOutput handles inspect log entries.
+func (h *ColorizedHandler) handleInspectOutput(e *lx.Entry) error {
+	builder := builderPool.Get().(*strings.Builder)
+	builder.Reset()
+	defer builderPool.Put(builder)
+
+	if h.showTime {
+		builder.WriteString(e.Timestamp.Format(h.timeFormat))
+		builder.WriteString(lx.Space)
+	}
+
+	h.formatNamespace(builder, e)
+	h.formatLevel(builder, e)
+	h.colorizeInspect(builder, e.Message)
+	builder.WriteString(lx.Newline)
+
+	_, err := h.w.Write([]byte(builder.String()))
+	return err
+}
+
+// colorizeJSON applies syntax highlighting to JSON strings without changing formatting
+func (h *ColorizedHandler) colorizeJSON(b *strings.Builder, jsonStr string) {
+	inString := false
+	escapeNext := false
+
+	for i := 0; i < len(jsonStr); i++ {
+		ch := jsonStr[i]
+
+		if escapeNext {
+			b.WriteByte(ch)
+			escapeNext = false
+			continue
+		}
+
+		switch ch {
+		case '\\':
+			escapeNext = true
+			if inString {
+				b.WriteString(h.palette.JSONString)
+			}
+			b.WriteByte(ch)
+
+		case '"':
+			if inString {
+				// End of string
+				b.WriteString(h.palette.JSONString)
+				b.WriteByte(ch)
+				b.WriteString(h.palette.Reset)
+				inString = false
+			} else {
+				// Start of string
+				inString = true
+				b.WriteString(h.palette.JSONString)
+				b.WriteByte(ch)
+			}
+
+		case ':':
+			if !inString {
+				b.WriteString(h.palette.JSONBrace)
+				b.WriteByte(ch)
+				b.WriteString(h.palette.Reset)
+			} else {
+				b.WriteByte(ch)
+			}
+
+		case '{', '}', '[', ']', ',':
+			if !inString {
+				b.WriteString(h.palette.JSONBrace)
+				b.WriteByte(ch)
+				b.WriteString(h.palette.Reset)
+			} else {
+				b.WriteByte(ch)
+			}
+
+		default:
+			if !inString {
+				// Check for numbers, booleans, null
+				remaining := jsonStr[i:]
+
+				// Check for null
+				if len(remaining) >= 4 && strings.HasPrefix(remaining, "null") {
+					b.WriteString(h.palette.JSONNull)
+					b.WriteString("null")
+					b.WriteString(h.palette.Reset)
+					i += 3 // Skip "null"
+				} else if len(remaining) >= 4 && strings.HasPrefix(remaining, "true") {
+					b.WriteString(h.palette.JSONBool)
+					b.WriteString("true")
+					b.WriteString(h.palette.Reset)
+					i += 3 // Skip "true"
+				} else if len(remaining) >= 5 && strings.HasPrefix(remaining, "false") {
+					b.WriteString(h.palette.JSONBool)
+					b.WriteString("false")
+					b.WriteString(h.palette.Reset)
+					i += 4 // Skip "false"
+				} else if (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' {
+					b.WriteString(h.palette.JSONNumber)
+					b.WriteByte(ch)
+					// Continue writing digits
+					for j := i + 1; j < len(jsonStr); j++ {
+						nextCh := jsonStr[j]
+						if (nextCh >= '0' && nextCh <= '9') || nextCh == '.' || nextCh == 'e' || nextCh == 'E' || nextCh == '+' || nextCh == '-' {
+							b.WriteByte(nextCh)
+							i = j
+						} else {
+							break
+						}
+					}
+					b.WriteString(h.palette.Reset)
+				} else if ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' {
+					// Preserve whitespace exactly as is
+					b.WriteByte(ch)
+				} else {
+					// Unexpected character outside string - preserve it
+					b.WriteByte(ch)
+				}
+			} else {
+				// Inside string
+				b.WriteByte(ch)
+			}
+		}
+	}
+}
+
+// colorizeInspect applies syntax highlighting to inspect output
+func (h *ColorizedHandler) colorizeInspect(b *strings.Builder, inspectStr string) {
+	lines := strings.Split(inspectStr, "\n")
+
+	for lineIdx, line := range lines {
+		if lineIdx > 0 {
+			b.WriteString("\n")
+		}
+
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			b.WriteString(line)
+			continue
+		}
+
+		// For inspect output, we'll do simple line-based coloring
+		// This preserves the original formatting
+		inString := false
+		escapeNext := false
+
+		for i := 0; i < len(line); i++ {
+			ch := line[i]
+
+			if escapeNext {
+				b.WriteByte(ch)
+				escapeNext = false
+				continue
+			}
+
+			if ch == '\\' {
+				escapeNext = true
+				b.WriteByte(ch)
+				continue
+			}
+
+			if ch == '"' {
+				inString = !inString
+				if inString {
+					// Check if this is a metadata key
+					if i+1 < len(line) && line[i+1] == '(' {
+						b.WriteString(h.palette.InspectMeta)
+					} else if i+2 < len(line) && line[i+1] == '*' && line[i+2] == '(' {
+						b.WriteString(h.palette.InspectMeta)
+					} else {
+						b.WriteString(h.palette.InspectKey)
+					}
+				}
+				b.WriteByte(ch)
+				if !inString {
+					b.WriteString(h.palette.Reset)
+				}
+				continue
+			}
+
+			if inString {
+				// Inside a string key or value
+				b.WriteByte(ch)
+			} else {
+				// Outside strings
+				if ch == ':' {
+					b.WriteString(h.palette.JSONBrace)
+					b.WriteByte(ch)
+					b.WriteString(h.palette.Reset)
+				} else if ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' {
+					b.WriteString(h.palette.JSONBrace)
+					b.WriteByte(ch)
+					b.WriteString(h.palette.Reset)
+				} else {
+					// Check for numbers, booleans, null outside strings
+					remaining := line[i:]
+
+					if len(remaining) >= 4 && strings.HasPrefix(remaining, "null") {
+						b.WriteString(h.palette.JSONNull)
+						b.WriteString("null")
+						b.WriteString(h.palette.Reset)
+						i += 3
+					} else if len(remaining) >= 4 && strings.HasPrefix(remaining, "true") {
+						b.WriteString(h.palette.JSONBool)
+						b.WriteString("true")
+						b.WriteString(h.palette.Reset)
+						i += 3
+					} else if len(remaining) >= 5 && strings.HasPrefix(remaining, "false") {
+						b.WriteString(h.palette.JSONBool)
+						b.WriteString("false")
+						b.WriteString(h.palette.Reset)
+						i += 4
+					} else if (ch >= '0' && ch <= '9') || ch == '-' {
+						b.WriteString(h.palette.InspectValue)
+						b.WriteByte(ch)
+						// Continue writing digits
+						for j := i + 1; j < len(line); j++ {
+							nextCh := line[j]
+							if (nextCh >= '0' && nextCh <= '9') || nextCh == '.' {
+								b.WriteByte(nextCh)
+								i = j
+							} else {
+								break
+							}
+						}
+						b.WriteString(h.palette.Reset)
+					} else {
+						b.WriteByte(ch)
+					}
+				}
+			}
+		}
+	}
+}
+
 // formatNamespace formats the namespace with ANSI color codes.
-// It supports FlatPath ([parent/child]) and NestedPath ([parent]→[child]) styles.
-// Example (internal usage):
-//
-//	h.formatNamespace(&builder, &lx.Entry{Namespace: "parent/child", Style: lx.FlatPath}) // Writes "[parent/child]: "
 func (h *ColorizedHandler) formatNamespace(b *strings.Builder, e *lx.Entry) {
 	if e.Namespace == "" {
 		return
@@ -422,7 +646,6 @@ func (h *ColorizedHandler) formatNamespace(b *strings.Builder, e *lx.Entry) {
 	b.WriteString(lx.LeftBracket)
 	switch e.Style {
 	case lx.NestedPath:
-		// Split namespace and format as [parent]→[child]
 		parts := strings.Split(e.Namespace, lx.Slash)
 		for i, part := range parts {
 			b.WriteString(part)
@@ -432,8 +655,7 @@ func (h *ColorizedHandler) formatNamespace(b *strings.Builder, e *lx.Entry) {
 				b.WriteString(lx.LeftBracket)
 			}
 		}
-	default: // FlatPath
-		// Format as [parent/child]
+	default:
 		b.WriteString(e.Namespace)
 		b.WriteString(lx.RightBracket)
 	}
@@ -442,32 +664,23 @@ func (h *ColorizedHandler) formatNamespace(b *strings.Builder, e *lx.Entry) {
 }
 
 // formatLevel formats the log level with ANSI color codes.
-// It applies a color based on the level (Debug, Info, Warn, Error) and resets afterward.
-// Example (internal usage):
-//
-//	h.formatLevel(&builder, &lx.Entry{Level: lx.LevelInfo}) // Writes "<green>INFO<reset>: "
 func (h *ColorizedHandler) formatLevel(b *strings.Builder, e *lx.Entry) {
-	// Map levels to colors
 	color := map[lx.LevelType]string{
-		lx.LevelDebug: h.palette.Debug, // Cyan
-		lx.LevelInfo:  h.palette.Info,  // Green
-		lx.LevelWarn:  h.palette.Warn,  // Yellow
-		lx.LevelError: h.palette.Error, // Red
-		lx.LevelFatal: h.palette.Fatal, // Bold Red
+		lx.LevelDebug: h.palette.Debug,
+		lx.LevelInfo:  h.palette.Info,
+		lx.LevelWarn:  h.palette.Warn,
+		lx.LevelError: h.palette.Error,
+		lx.LevelFatal: h.palette.Fatal,
 	}[e.Level]
 
 	b.WriteString(color)
-	b.WriteString(rightPad(e.Level.String(), 5))
+	b.WriteString(e.Level.String())
 	b.WriteString(h.palette.Reset)
 	b.WriteString(lx.Colon)
 	b.WriteString(lx.Space)
 }
 
 // formatFields formats the log entry's fields in sorted order.
-// It writes fields as [key=value key=value], with type-based coloring for values.
-// Example (internal usage):
-//
-//	h.formatFields(&builder, &lx.Entry{Fields: map[string]interface{}{"key": "value"}}) // Writes " [key=value]"
 func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 	if len(e.Fields) == 0 {
 		return
@@ -476,19 +689,16 @@ func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 	b.WriteString(lx.Space)
 	b.WriteString(lx.LeftBracket)
 
-	// Format fields as key=value in insertion order
 	for i, pair := range e.Fields {
 		if i > 0 {
 			b.WriteString(lx.Space)
 		}
 
-		// Color the key
 		b.WriteString(h.palette.Key)
 		b.WriteString(pair.Key)
 		b.WriteString(h.palette.Reset)
 		b.WriteString("=")
 
-		// Format value with type-based coloring
 		h.formatFieldValue(b, pair.Value)
 	}
 
@@ -496,48 +706,37 @@ func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 }
 
 // formatFieldValue formats a field value with type-based ANSI color codes.
-// It applies different colors for numbers, strings, booleans, times, errors, etc.
-// Example (internal usage):
-//
-//	h.formatFieldValue(&builder, 42) // Writes colored "42"
 func (h *ColorizedHandler) formatFieldValue(b *strings.Builder, value interface{}) {
 	switch v := value.(type) {
 	case time.Time:
-		// Format timestamps
 		b.WriteString(h.palette.Time)
 		b.WriteString(v.Format("2006-01-02 15:04:05"))
 		b.WriteString(h.palette.Reset)
 
 	case time.Duration:
-		// Format durations in a human-readable way
 		b.WriteString(h.palette.Time)
 		h.formatDuration(b, v)
 		b.WriteString(h.palette.Reset)
 
 	case error:
-		// Format errors with special highlighting
 		b.WriteString(h.palette.Error)
 		b.WriteString(`"`)
 		b.WriteString(v.Error())
 		b.WriteString(`"`)
 		b.WriteString(h.palette.Reset)
 
-	// Integer types
 	case int, int8, int16, int32, int64:
 		b.WriteString(h.palette.Number)
 		fmt.Fprint(b, v)
 		b.WriteString(h.palette.Reset)
 
-	// Unsigned integer types
 	case uint, uint8, uint16, uint32, uint64:
 		b.WriteString(h.palette.Number)
 		fmt.Fprint(b, v)
 		b.WriteString(h.palette.Reset)
 
-	// Float types
 	case float32, float64:
 		b.WriteString(h.palette.Number)
-		// Smart precision formatting
 		switch f := v.(type) {
 		case float32:
 			fmt.Fprintf(b, "%.6g", f)
@@ -548,7 +747,6 @@ func (h *ColorizedHandler) formatFieldValue(b *strings.Builder, value interface{
 
 	case string:
 		b.WriteString(h.palette.String)
-		// Quote strings for clarity
 		b.WriteString(`"`)
 		b.WriteString(v)
 		b.WriteString(`"`)
@@ -565,7 +763,6 @@ func (h *ColorizedHandler) formatFieldValue(b *strings.Builder, value interface{
 		b.WriteString(h.palette.Reset)
 
 	default:
-		// Default formatting for unknown types
 		b.WriteString(h.palette.Default)
 		fmt.Fprint(b, v)
 		b.WriteString(h.palette.Reset)
@@ -594,11 +791,6 @@ func (h *ColorizedHandler) formatDuration(b *strings.Builder, d time.Duration) {
 }
 
 // formatStack formats a stack trace with ANSI color codes.
-// It structures the stack trace with colored goroutine, function, and path segments,
-// using indentation and separators for readability.
-// Example (internal usage):
-//
-//	h.formatStack(&builder, []byte("goroutine 1 [running]:\nmain.main()\n\tmain.go:10")) // Appends colored stack trace
 func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 	b.WriteString("\n")
 	b.WriteString(h.palette.Header)
@@ -611,14 +803,12 @@ func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 		return
 	}
 
-	// Format goroutine line
 	b.WriteString("  ┌─ ")
 	b.WriteString(h.palette.Goroutine)
 	b.WriteString(lines[0])
 	b.WriteString(h.palette.Reset)
 	b.WriteString("\n")
 
-	// Field function name and file path lines
 	for i := 1; i < len(lines)-1; i += 2 {
 		funcLine := strings.TrimSpace(lines[i])
 		pathLine := strings.TrimSpace(lines[i+1])
@@ -633,25 +823,21 @@ func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 		if pathLine != "" {
 			b.WriteString("  │   ")
 
-			// Look for last "/" before ".go:"
 			lastSlash := strings.LastIndex(pathLine, "/")
 			goIndex := strings.Index(pathLine, ".go:")
 
 			if lastSlash >= 0 && goIndex > lastSlash {
-				// Prefix path
 				prefix := pathLine[:lastSlash+1]
-				// File and line (e.g., ll.go:698 +0x5c)
 				suffix := pathLine[lastSlash+1:]
 
 				b.WriteString(h.palette.Path)
 				b.WriteString(prefix)
 				b.WriteString(h.palette.Reset)
 
-				b.WriteString(h.palette.Path) // Use mainPath color for suffix
+				b.WriteString(h.palette.Path)
 				b.WriteString(suffix)
 				b.WriteString(h.palette.Reset)
 			} else {
-				// Fallback: whole line is gray
 				b.WriteString(h.palette.Path)
 				b.WriteString(pathLine)
 				b.WriteString(h.palette.Reset)
@@ -661,7 +847,6 @@ func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 		}
 	}
 
-	// Handle any remaining unpaired line
 	if len(lines)%2 == 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
 		b.WriteString("  │   ")
 		b.WriteString(h.palette.Func)
@@ -674,36 +859,25 @@ func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 }
 
 // handleDumpOutput formats hex dump output with ANSI color codes.
-// It applies colors to position, hex, ASCII, and title components of the dump,
-// wrapping the output with colored BEGIN/END separators.
-// Returns an error if writing fails.
-// Example (internal usage):
-//
-//	h.handleDumpOutput(&lx.Entry{Class: lx.ClassDump, Message: "pos 00 hex: 61 62 'ab'"}) // Writes colored dump
 func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
-	// Get a builder from pool
 	builder := builderPool.Get().(*strings.Builder)
 	builder.Reset()
 	defer builderPool.Put(builder)
 
-	// Add timestamp if enabled
 	if h.showTime {
 		builder.WriteString(e.Timestamp.Format(h.timeFormat))
 		builder.WriteString(lx.Newline)
 	}
 
-	// Write colored BEGIN separator
 	builder.WriteString(h.palette.Title)
 	builder.WriteString("---- BEGIN DUMP ----")
 	builder.WriteString(h.palette.Reset)
 	builder.WriteString("\n")
 
-	// Process each line of the dump
 	lines := strings.Split(e.Message, "\n")
 	length := len(lines)
 	for i, line := range lines {
 		if strings.HasPrefix(line, "pos ") {
-			// Parse and color position and hex/ASCII parts
 			parts := strings.SplitN(line, "hex:", 2)
 			if len(parts) == 2 {
 				builder.WriteString(h.palette.Pos)
@@ -724,63 +898,46 @@ func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
 				}
 			}
 		} else if strings.HasPrefix(line, "Dumping value of type:") {
-			// Color type dump lines
 			builder.WriteString(h.palette.Header)
 			builder.WriteString(line)
 			builder.WriteString(h.palette.Reset)
 		} else {
-			// Write non-dump lines as-is
 			builder.WriteString(line)
 		}
 
-		// Don't add newline for the last line
 		if i < length-1 {
 			builder.WriteString("\n")
 		}
 	}
 
-	// Write colored END separator
 	builder.WriteString(h.palette.Title)
 	builder.WriteString("---- END DUMP ----")
 	builder.WriteString(h.palette.Reset)
 	builder.WriteString("\n")
 
-	// Write formatted output to writer
 	_, err := h.w.Write([]byte(builder.String()))
 	return err
 }
 
-// detectPalette selects a color palette based on terminal environment variables and intensity setting.
-// It checks TERM_BACKGROUND, COLORFGBG, AppleInterfaceStyle, and NO_COLOR to determine
-// whether a light or dark palette is appropriate, and applies intensity settings.
-// Example (internal usage):
-//
-//	palette := h.detectPalette() // Returns appropriate palette with intensity applied
+// detectPalette selects a color palette based on terminal environment variables.
 func (h *ColorizedHandler) detectPalette() Palette {
-	// If colors are explicitly disabled, return noColorPalette
 	if h.noColor {
 		return noColorPalette
 	}
 
-	// Check NO_COLOR environment variable (standard: https://no-color.org/)
 	if os.Getenv("NO_COLOR") != "" {
 		return noColorPalette
 	}
 
-	// Check if terminal supports colors
 	term := os.Getenv("TERM")
 	if term == "dumb" || term == "" {
-		// Check if we're on Windows without ANSI support
 		if runtime.GOOS == "windows" && !h.isWindowsTerminalAnsiSupported() {
 			return noColorPalette
 		}
-		// For non-Windows or Windows with ANSI, continue detection
 	}
 
-	// Get base palette based on terminal background
 	var basePalette Palette
 
-	// Check TERM_BACKGROUND (e.g., iTerm2)
 	if bg, ok := os.LookupEnv("TERM_BACKGROUND"); ok {
 		if bg == "light" {
 			basePalette = lightPalette
@@ -788,36 +945,29 @@ func (h *ColorizedHandler) detectPalette() Palette {
 			basePalette = darkPalette
 		}
 	} else if fgBg, ok := os.LookupEnv("COLORFGBG"); ok {
-		// Check COLORFGBG (traditional xterm)
 		parts := strings.Split(fgBg, ";")
 		if len(parts) >= 2 {
-			bg := parts[len(parts)-1] // Last part (some terminals add more fields)
+			bg := parts[len(parts)-1]
 
-			// Try to parse background color
 			bgInt, err := strconv.Atoi(bg)
 			if err == nil {
-				// Light background colors: 0-7, 15 (white)
-				// Dark background colors: 8-14 (bright colors)
 				if bgInt >= 0 && bgInt <= 7 || bgInt == 15 {
 					basePalette = lightPalette
 				} else {
 					basePalette = darkPalette
 				}
 			} else {
-				basePalette = darkPalette // Default to dark
+				basePalette = darkPalette
 			}
 		} else {
-			basePalette = darkPalette // Default to dark
+			basePalette = darkPalette
 		}
 	} else if style, ok := os.LookupEnv("AppleInterfaceStyle"); ok && strings.EqualFold(style, "dark") {
-		// Check macOS dark mode
 		basePalette = darkPalette
 	} else {
-		// Default: dark (conservative choice for terminals)
 		basePalette = darkPalette
 	}
 
-	// Apply intensity setting
 	return h.applyIntensity(basePalette)
 }
 
@@ -843,29 +993,17 @@ func (h *ColorizedHandler) isWindowsTerminalAnsiSupported() bool {
 		return true
 	}
 
-	// Windows Terminal
 	if os.Getenv("WT_SESSION") != "" {
 		return true
 	}
 
-	// ConEmu/ConEmu64
 	if os.Getenv("ConEmuANSI") == "ON" {
 		return true
 	}
 
-	// ANSICON
 	if os.Getenv("ANSICON") != "" {
 		return true
 	}
 
-	// Check Windows version (Windows 10+ has ANSI support in cmd/powershell)
-	// This is a simplified check - in production you might want more detailed version checking
 	return false
 }
-
-//func padRight(str string, length int) string {
-//	if len(str) >= length {
-//		return str
-//	}
-//	return str + strings.Repeat(" ", length-len(str))
-//}

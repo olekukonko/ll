@@ -421,7 +421,7 @@ func (l *Logger) output(skip int, values ...interface{}) {
 				"error": err.Error(),
 			}, "  ", "  ")
 		}
-		l.log(lx.LevelInfo, lx.ClassText, header+string(b), nil, false)
+		l.log(lx.LevelInfo, lx.ClassJSON, header+string(b), nil, false)
 	}
 }
 
@@ -521,7 +521,7 @@ func (l *Logger) Err(errs ...error) {
 			l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors})
 		}
 		// Log concatenated error messages
-		l.log(lx.LevelError, lx.ClassInspect, builder.String(), nil, false)
+		l.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
 	}
 }
 
