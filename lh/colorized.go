@@ -267,13 +267,14 @@ var builderPool = sync.Pool{
 
 // ColorizedHandler is a handler that outputs log entries with ANSI color codes.
 type ColorizedHandler struct {
-	w          io.Writer
-	palette    Palette
-	showTime   bool
-	timeFormat string
-	mu         sync.Mutex
-	noColor    bool
-	intensity  ColorIntensity
+	w           io.Writer
+	palette     Palette
+	showTime    bool
+	timeFormat  string
+	mu          sync.Mutex
+	noColor     bool           // Whether to disable colors entirely
+	intensity   ColorIntensity // Color intensity level
+	colorFields bool           // Whether to colorize fields (default: true)
 }
 
 // ColorOption defines a configuration function for ColorizedHandler.
@@ -286,10 +287,22 @@ func WithColorPallet(pallet Palette) ColorOption {
 	}
 }
 
-// WithNoColor disables all color output.
-func WithNoColor() ColorOption {
+// WithColorNone disables all color output.
+func WithColorNone() ColorOption {
 	return func(c *ColorizedHandler) {
 		c.noColor = true
+		c.colorFields = false // Also disable field coloring
+	}
+}
+
+// WithColorField enables or disables field coloring specifically.
+// This is useful for performance optimization or when field colors are too much.
+// Example:
+//
+//	handler := NewColorizedHandler(os.Stdout, WithColorField(false)) // Disable field coloring only
+func WithColorField(enable bool) ColorOption {
+	return func(c *ColorizedHandler) {
+		c.colorFields = enable
 	}
 }
 
@@ -310,11 +323,12 @@ func WithColorIntensity(intensity ColorIntensity) ColorOption {
 // NewColorizedHandler creates a new ColorizedHandler writing to the specified writer.
 func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
 	c := &ColorizedHandler{
-		w:          w,
-		showTime:   false,
-		timeFormat: time.RFC3339,
-		noColor:    false,
-		intensity:  IntensityNormal,
+		w:           w,
+		showTime:    false,
+		timeFormat:  time.RFC3339,
+		noColor:     false,
+		intensity:   IntensityNormal,
+		colorFields: true, // Default: enable field coloring
 	}
 
 	for _, opt := range opts {
@@ -674,7 +688,7 @@ func (h *ColorizedHandler) formatLevel(b *strings.Builder, e *lx.Entry) {
 	}[e.Level]
 
 	b.WriteString(color)
-	b.WriteString(e.Level.String())
+	b.WriteString(rightPad(e.Level.String(), 5))
 	b.WriteString(h.palette.Reset)
 	b.WriteString(lx.Colon)
 	b.WriteString(lx.Space)
@@ -694,12 +708,21 @@ func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 			b.WriteString(lx.Space)
 		}
 
-		b.WriteString(h.palette.Key)
-		b.WriteString(pair.Key)
-		b.WriteString(h.palette.Reset)
-		b.WriteString("=")
+		if h.colorFields {
+			// Color the key
+			b.WriteString(h.palette.Key)
+			b.WriteString(pair.Key)
+			b.WriteString(h.palette.Reset)
+			b.WriteString("=")
 
-		h.formatFieldValue(b, pair.Value)
+			// Format value with type-based coloring
+			h.formatFieldValue(b, pair.Value)
+		} else {
+			// No field coloring - just write plain text
+			b.WriteString(pair.Key)
+			b.WriteString("=")
+			fmt.Fprint(b, pair.Value)
+		}
 	}
 
 	b.WriteString(lx.RightBracket)
@@ -707,6 +730,12 @@ func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 
 // formatFieldValue formats a field value with type-based ANSI color codes.
 func (h *ColorizedHandler) formatFieldValue(b *strings.Builder, value interface{}) {
+	// If field coloring is disabled, just write the value
+	if !h.colorFields {
+		fmt.Fprint(b, value)
+		return
+	}
+
 	switch v := value.(type) {
 	case time.Time:
 		b.WriteString(h.palette.Time)
@@ -921,10 +950,12 @@ func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
 
 // detectPalette selects a color palette based on terminal environment variables.
 func (h *ColorizedHandler) detectPalette() Palette {
+	// If colors are explicitly disabled, return noColorPalette
 	if h.noColor {
 		return noColorPalette
 	}
 
+	// Check NO_COLOR environment variable (standard: https://no-color.org/)
 	if os.Getenv("NO_COLOR") != "" {
 		return noColorPalette
 	}
