@@ -533,7 +533,7 @@ func TestTextHandler(t *testing.T) {
 		t.Errorf("Handle failed: %v", err)
 	}
 	// Verify the output format
-	if !strings.Contains(buf.String(), "INFO : test [key=1]") {
+	if !strings.Contains(buf.String(), "INFO: test [key=1]") {
 		t.Errorf("Unexpected output: %s", buf.String())
 	}
 }

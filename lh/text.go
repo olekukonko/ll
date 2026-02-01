@@ -147,7 +147,7 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 	}
 
 	// Add level and message
-	builder.WriteString(rightPad(e.Level.String(), 5))
+	builder.WriteString(e.Level.String())
 	builder.WriteString(lx.Colon)
 	builder.WriteString(lx.Space)
 	builder.WriteString(e.Message)

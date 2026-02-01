@@ -3,12 +3,13 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/olekukonko/ll"
-	"github.com/olekukonko/ll/lh"
-	"github.com/olekukonko/ll/lx"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/olekukonko/ll"
+	"github.com/olekukonko/ll/lh"
+	"github.com/olekukonko/ll/lx"
 )
 
 // TestHandlers verifies the behavior of all log handlers (Text, Colorized, JSON, Slog, Multi).
@@ -90,7 +91,7 @@ func TestHandlers(t *testing.T) {
 		logger.Fields("key", "value").Infof("Test multi")
 		// Verify TextHandler output
 		if !strings.Contains(buf1.String(), "[test] INFO: Test multi [key=value]") {
-			t.Errorf("Expected %q to contain %q", buf1.String(), "[test] INFO: Test multi [key=value]")
+			t.Errorf("Expected %q to contain %q", buf1.String(), "[test] INFO : Test multi [key=value]")
 		}
 		// Verify JSONHandler output
 		var data map[string]interface{}

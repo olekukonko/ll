@@ -3,11 +3,12 @@ package tests
 
 import (
 	"bytes"
+	"strings"
+	"testing"
+
 	"github.com/olekukonko/ll"
 	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
-	"strings"
-	"testing"
 )
 
 // TestNamespaceEnableWithCustomSeparator verifies that enabling a namespace with a custom separator
