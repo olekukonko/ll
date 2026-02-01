@@ -521,7 +521,7 @@ func (l *Logger) Err(errs ...error) {
 			l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors})
 		}
 		// Log concatenated error messages
-		l.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
+		l.log(lx.LevelError, lx.ClassInspect, builder.String(), nil, false)
 	}
 }
 

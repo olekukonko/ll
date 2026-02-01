@@ -68,7 +68,8 @@ const (
 	ClassDump                     // Dump entries for hex/ASCII dumps
 	ClassSpecial                  // Special entries for custom or non-standard logs
 	ClassRaw                      // Raw entries for unformatted output
-	ClassUnknown                  // Raw entries for unformatted output
+	ClassInspect                  // Inspect entries for debugging
+	ClassUnknown                  // Unknown output
 )
 
 // Namespace style constants.
