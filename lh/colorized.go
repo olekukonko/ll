@@ -64,11 +64,11 @@ type Palette struct {
 
 // darkPalette defines colors optimized for dark terminal backgrounds.
 var darkPalette = Palette{
-	Header:    "\033[1;31m",
-	Goroutine: "\033[1;36m",
-	Func:      "\033[97m",
-	Path:      "\033[38;5;245m",
-	FileLine:  "\033[38;5;111m",
+	Header:    "\033[1;38;5;203m", // Brighter red
+	Goroutine: "\033[1;38;5;51m",  // Bright cyan
+	Func:      "\033[1;97m",       // Bright white
+	Path:      "\033[38;5;110m",   // Brighter gray-blue
+	FileLine:  "\033[38;5;117m",   // Bright blue
 	Reset:     "\033[0m",
 	Title:     "\033[38;5;245m",
 	Pos:       "\033[38;5;117m",
@@ -80,14 +80,14 @@ var darkPalette = Palette{
 	Error:     "\033[31m",
 	Fatal:     "\033[1;31m",
 
-	// Field type colors
-	Key:     "\033[38;5;117m",
-	Number:  "\033[38;5;141m",
-	String:  "\033[38;5;223m",
-	Bool:    "\033[38;5;85m",
-	Time:    "\033[38;5;110m",
-	Nil:     "\033[38;5;243m",
-	Default: "\033[38;5;250m",
+	// Field type colors - made brighter for dark backgrounds
+	Key:     "\033[38;5;117m", // Brighter blue
+	Number:  "\033[38;5;141m", // Brighter purple
+	String:  "\033[38;5;223m", // Brighter yellow/orange
+	Bool:    "\033[38;5;85m",  // Brighter green
+	Time:    "\033[38;5;110m", // Brighter cyan-blue
+	Nil:     "\033[38;5;243m", // Slightly brighter gray
+	Default: "\033[38;5;250m", // Brighter gray
 
 	// JSON and Inspect colors
 	JSONKey:      "\033[38;5;117m",
@@ -317,6 +317,24 @@ func WithColorShowTime(show bool) ColorOption {
 func WithColorIntensity(intensity ColorIntensity) ColorOption {
 	return func(c *ColorizedHandler) {
 		c.intensity = intensity
+	}
+}
+
+// WithColorTheme configures the ColorizedHandler to use a specific color theme based on the provided theme name.
+func WithColorTheme(theme string) ColorOption {
+	return func(c *ColorizedHandler) {
+		switch strings.ToLower(theme) {
+		case "light":
+			c.palette = lightPalette
+		case "dark":
+			c.palette = darkPalette
+		case "bright":
+			c.palette = brightPalette
+		case "pastel":
+			c.palette = pastelPalette
+		case "vibrant":
+			c.palette = vibrantPalette
+		}
 	}
 }
 
@@ -967,39 +985,35 @@ func (h *ColorizedHandler) detectPalette() Palette {
 		}
 	}
 
-	var basePalette Palette
+	// First, try to detect background color
+	isDarkBackground := true // Default to dark
 
-	if bg, ok := os.LookupEnv("TERM_BACKGROUND"); ok {
-		if bg == "light" {
-			basePalette = lightPalette
-		} else {
-			basePalette = darkPalette
-		}
-	} else if fgBg, ok := os.LookupEnv("COLORFGBG"); ok {
+	// Check for common dark/light environment variables
+	if style, ok := os.LookupEnv("AppleInterfaceStyle"); ok && strings.EqualFold(style, "dark") {
+		isDarkBackground = true
+	} else if style, ok := os.LookupEnv("APPEARANCE"); ok && strings.EqualFold(style, "light") {
+		isDarkBackground = false
+	} else if bg := os.Getenv("TERM_BACKGROUND"); bg != "" {
+		isDarkBackground = strings.ToLower(bg) != "light"
+	} else if fgBg := os.Getenv("COLORFGBG"); fgBg != "" {
+		// COLORFGBG format: "foreground;background" or "foreground;background;unused"
 		parts := strings.Split(fgBg, ";")
 		if len(parts) >= 2 {
 			bg := parts[len(parts)-1]
-
 			bgInt, err := strconv.Atoi(bg)
 			if err == nil {
-				if bgInt >= 0 && bgInt <= 7 || bgInt == 15 {
-					basePalette = lightPalette
-				} else {
-					basePalette = darkPalette
-				}
-			} else {
-				basePalette = darkPalette
+				// According to XTerm documentation:
+				// 0-7: dark colors, 15: white, 8-14: bright colors
+				// Typically, 0=black (dark), 7=light gray (light), 15=white (light)
+				isDarkBackground = (bgInt >= 0 && bgInt <= 6) || (bgInt >= 8 && bgInt <= 14)
 			}
-		} else {
-			basePalette = darkPalette
 		}
-	} else if style, ok := os.LookupEnv("AppleInterfaceStyle"); ok && strings.EqualFold(style, "dark") {
-		basePalette = darkPalette
-	} else {
-		basePalette = darkPalette
 	}
 
-	return h.applyIntensity(basePalette)
+	if isDarkBackground {
+		return h.applyIntensity(darkPalette)
+	}
+	return h.applyIntensity(lightPalette)
 }
 
 // applyIntensity applies the intensity setting to a base palette
