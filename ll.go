@@ -28,6 +28,7 @@ type Logger struct {
 	enabled         bool          // Determines if logging is enabled
 	suspend         atomic.Bool   // uses suspend path for most actions eg. skipping namespace checks
 	level           lx.LevelType  // Minimum log level (e.g., Debug, Info, Warn, Error)
+	atomicLevel     int32         // Shadow copy of level for lock-free checks
 	namespaces      *lx.Namespace // Manages namespace enable/disable states
 	currentPath     string        // Current namespace path (e.g., "parent/child")
 	context         lx.Fields     // Contextual fields included in all logs
@@ -55,6 +56,7 @@ func New(namespace string, opts ...Option) *Logger {
 	logger := &Logger{
 		enabled:         lx.DefaultEnabled,            // Defaults to disabled (false)
 		level:           lx.LevelDebug,                // Default minimum log level
+		atomicLevel:     int32(lx.LevelDebug),         // Initialize atomic level
 		namespaces:      defaultStore,                 // Shared namespace store
 		currentPath:     namespace,                    // Initial namespace path
 		context:         make(lx.Fields, 0, 10),       // Empty context for fields
@@ -184,6 +186,7 @@ func (l *Logger) Clone() *Logger {
 	return &Logger{
 		enabled:         l.enabled,              // Copy enablement state
 		level:           l.level,                // Copy log level
+		atomicLevel:     l.atomicLevel,          // Copy atomic level
 		namespaces:      l.namespaces,           // Share namespace store
 		currentPath:     l.currentPath,          // Copy namespace path
 		context:         make(lx.Fields, 0, 10), // Fresh context map
@@ -214,6 +217,7 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 	newLogger := &Logger{
 		enabled:         l.enabled,
 		level:           l.level,
+		atomicLevel:     l.atomicLevel,
 		namespaces:      l.namespaces,
 		currentPath:     l.currentPath,
 		context:         make(lx.Fields, 0, len(l.context)+len(fields)),
@@ -808,6 +812,7 @@ func (l *Logger) Level(level lx.LevelType) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.level = level
+	atomic.StoreInt32(&l.atomicLevel, int32(level))
 	return l
 }
 
@@ -927,6 +932,7 @@ func (l *Logger) Namespace(name string) *Logger {
 	return &Logger{
 		enabled:         l.enabled,
 		level:           l.level,
+		atomicLevel:     l.atomicLevel,
 		namespaces:      l.namespaces,
 		currentPath:     fullPath,
 		context:         make(lx.Fields, 0, 10),
@@ -1457,13 +1463,19 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	finalMsg := builder.String()
 
 	// Create combined fields slice - THIS PRESERVES ORDER!
-	combinedFields := make(lx.Fields, 0, len(l.context)+len(fields))
-
-	// Add context fields first (in order)
-	combinedFields = append(combinedFields, l.context...)
-
-	// Add immediate fields
-	combinedFields = append(combinedFields, fields...)
+	// Optimized slice allocation
+	var combinedFields lx.Fields
+	if len(l.context) == 0 {
+		combinedFields = fields
+	} else if len(fields) == 0 {
+		combinedFields = l.context
+	} else {
+		combinedFields = make(lx.Fields, 0, len(l.context)+len(fields))
+		// Add context fields first (in order)
+		combinedFields = append(combinedFields, l.context...)
+		// Add immediate fields
+		combinedFields = append(combinedFields, fields...)
+	}
 
 	// Create log entry with ordered fields
 	entry := &lx.Entry{
@@ -1511,8 +1523,8 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 		return false
 	}
 
-	// Skip if log level is below minimum
-	if level > l.level {
+	// Atomic fast path: read level without lock
+	if level > lx.LevelType(atomic.LoadInt32(&l.atomicLevel)) {
 		return false
 	}
 
