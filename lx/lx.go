@@ -1,6 +1,7 @@
 package lx
 
 import (
+	"io"
 	"strings"
 	"time"
 )
@@ -167,6 +168,40 @@ type Entry struct {
 //	}
 type Handler interface {
 	Handle(e *Entry) error // Processes a log entry, returning any error
+}
+
+// Outputter defines the interface for handlers that support dynamic output
+// destination changes. Implementations can switch their output writer at runtime.
+//
+// Example usage:
+//
+//	h := &JSONHandler{}
+//	h.Output(os.Stderr) // Switch to stderr
+//	h.Output(file)      // Switch to file
+type Outputter interface {
+	Output(w io.Writer)
+}
+
+// HandlerOutputter combines the Handler and Outputter interfaces.
+// Types implementing this interface can both process log entries and
+// dynamically change their output destination at runtime.
+//
+// This is useful for creating flexible logging handlers that support
+// features like log rotation, output redirection, or runtime configuration.
+//
+// Example usage:
+//
+//	var ho HandlerOutputter = &TextHandler{}
+//	// Handle log entries
+//	ho.Handle(&Entry{...})
+//	// Switch output destination
+//	ho.Output(os.Stderr)
+//
+// Common implementations include TextHandler and JSONHandler when they
+// support output destination changes.
+type HandlerOutputter interface {
+	Handler   // Can process log entries
+	Outputter // Can change output destination (has Output(w io.Writer) method)
 }
 
 // Timestamper defines an interface for handlers that support timestamp configuration.
