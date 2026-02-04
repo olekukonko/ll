@@ -6,11 +6,6 @@ import (
 	"github.com/olekukonko/ll/lx"
 )
 
-// Wrap is a handler decorator function that transforms a log handler.
-// It takes an existing handler as input and returns a new, wrapped handler
-// that adds functionality (like filtering, transformation, or routing).
-type Wrap func(next lx.Handler) lx.Handler
-
 // Pipe chains multiple handler wrappers together, applying them from left to right.
 // The wrappers are composed such that the first wrapper in the list becomes
 // the innermost layer, and the last wrapper becomes the outermost layer.
@@ -31,7 +26,7 @@ type Wrap func(next lx.Handler) lx.Handler
 //	logger := lx.NewLogger(handler)
 //
 // In this example, logs flow: Dedup → RateLimit → AddTimestamp → JSONHandler
-func Pipe(h lx.Handler, wraps ...Wrap) lx.Handler {
+func Pipe(h lx.Handler, wraps ...lx.Wrap) lx.Handler {
 	for _, w := range wraps {
 		if w != nil {
 			h = w(h)
@@ -40,13 +35,13 @@ func Pipe(h lx.Handler, wraps ...Wrap) lx.Handler {
 	return h
 }
 
-func PipeDedup(ttl time.Duration, opts ...DedupOpt[lx.Handler]) Wrap {
+func PipeDedup(ttl time.Duration, opts ...DedupOpt[lx.Handler]) lx.Wrap {
 	return func(next lx.Handler) lx.Handler {
 		return NewDedup(next, ttl, opts...)
 	}
 }
 
-func PipeBuffer(opts ...BufferingOpt) Wrap {
+func PipeBuffer(opts ...BufferingOpt) lx.Wrap {
 	return func(next lx.Handler) lx.Handler {
 		return NewBuffered(next, opts...)
 	}
@@ -55,7 +50,7 @@ func PipeBuffer(opts ...BufferingOpt) Wrap {
 func PipeRotate(
 	maxSizeBytes int64,
 	src RotateSource,
-) Wrap {
+) lx.Wrap {
 	return func(next lx.Handler) lx.Handler {
 		h, ok := next.(interface {
 			lx.HandlerOutputter
