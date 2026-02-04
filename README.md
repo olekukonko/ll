@@ -331,6 +331,29 @@ func main() {
 
 See `ll_bench_test.go` for detailed benchmarks on namespace creation, cloning, and field building.
 
+
+```text
+goos: darwin
+goarch: arm64
+pkg: github.com/olekukonko/ll/tests
+cpu: Apple M3 Pro
+BenchmarkNamespaceLoop-12                1499790               753.1 ns/op           798 B/op         10 allocs/op
+BenchmarkNamespaceCached-12              2550714               550.3 ns/op           267 B/op          6 allocs/op
+BenchmarkCloneLoop-12                    3077284               415.3 ns/op           720 B/op          6 allocs/op
+BenchmarkFieldsLoggerLoop-12             2141598               524.6 ns/op           824 B/op          9 allocs/op
+BenchmarkPrefixLoop-12                   4326238               346.0 ns/op           256 B/op          6 allocs/op
+BenchmarkIndentLoop-12                   5412259               275.7 ns/op           204 B/op          4 allocs/op
+BenchmarkLogger_Disabled-12             74423990                15.94 ns/op            0 B/op          0 allocs/op
+BenchmarkLogger_SimpleText-12            8045469               176.2 ns/op           176 B/op          2 allocs/op
+BenchmarkLogger_WithFields-12            2930190               382.9 ns/op           320 B/op          4 allocs/op
+BenchmarkLogger_ContextAndFields-12      2881372               384.6 ns/op           352 B/op          5 allocs/op
+BenchmarkLogger_JSON-12                  1234435              1006 ns/op             936 B/op         13 allocs/op
+BenchmarkDedup_Serial-12                 6479538               213.9 ns/op           184 B/op          2 allocs/op
+BenchmarkDedup_Parallel-12               9019822               173.0 ns/op           192 B/op          2 allocs/op
+BenchmarkDedup_HighCardinality-12        2323809               495.7 ns/op           297 B/op          5 allocs/op
+PASS
+ok      github.com/olekukonko/ll/tests  37.298s
+```
 ## Testing and Stability
 
 The `ll` library includes a comprehensive test suite (`ll_test.go`) covering:
