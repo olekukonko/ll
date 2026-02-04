@@ -1,6 +1,7 @@
 package lh
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/olekukonko/ll/lx"
 )
+
+var jsonBufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
 
 // JSONHandler is a handler that outputs log entries as JSON objects.
 // It formats log entries with timestamp, level, message, namespace, fields, and optional
@@ -85,6 +92,13 @@ func (h *JSONHandler) Handle(e *lx.Entry) error {
 	return h.handleRegular(e)
 }
 
+// Output sets the Writer destination for JSONHandler's output, ensuring thread safety with a mutex lock.
+func (h *JSONHandler) Output(w io.Writer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.writer = w
+}
+
 // handleRegular handles standard log entries (non-dump).
 // It converts the entry to a JsonOutput struct and encodes it as JSON,
 // applying pretty printing if enabled. Logs encoding errors to stderr for debugging.
@@ -110,20 +124,29 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 		Fields:    fieldsMap,                     // Copy fields as map
 		Stack:     e.Stack,                       // Include stack trace if present
 	}
-	// Create JSON encoder
-	enc := json.NewEncoder(h.writer)
+
+	// Acquire buffer from pool to avoid allocation and reduce syscalls
+	buf := jsonBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer jsonBufPool.Put(buf)
+
+	// Create JSON encoder writing to buffer
+	enc := json.NewEncoder(buf)
 	if h.pretty {
 		// Enable indentation for pretty printing
 		enc.SetIndent("", "  ")
 	}
-	// Log encoding attempt for debugging
-	// fmt.Fprintf(os.Stderr, "Encoding JSON entry: %v\n", e.Message)
-	// Encode and write JSON
+
+	// Encode JSON to buffer
 	err := enc.Encode(entry)
 	if err != nil {
 		// Log encoding error for debugging
 		fmt.Fprintf(os.Stderr, "JSON encode error: %v\n", err)
+		return err
 	}
+
+	// Write buffer to underlying writer in one go
+	_, err = h.writer.Write(buf.Bytes())
 	return err
 }
 
@@ -169,8 +192,18 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 		fieldsMap[pair.Key] = pair.Value
 	}
 
-	// Encode JSON output with dump segments
-	return json.NewEncoder(h.writer).Encode(JsonOutput{
+	// Acquire buffer from pool
+	buf := jsonBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer jsonBufPool.Put(buf)
+
+	// Encode JSON output with dump segments to buffer
+	enc := json.NewEncoder(buf)
+	if h.pretty {
+		enc.SetIndent("", "  ")
+	}
+
+	err := enc.Encode(JsonOutput{
 		Time:      e.Timestamp.Format(h.timeFmt), // Format timestamp
 		Level:     e.Level.String(),              // Convert level to string
 		Class:     e.Class.String(),              // Convert class to string
@@ -180,4 +213,13 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 		Fields:    fieldsMap,                     // Copy fields as map
 		Stack:     e.Stack,                       // Include stack trace if present
 	})
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "JSON dump encode error: %v\n", err)
+		return err
+	}
+
+	// Write buffer to underlying writer
+	_, err = h.writer.Write(buf.Bytes())
+	return err
 }
