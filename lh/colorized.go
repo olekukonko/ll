@@ -1,6 +1,7 @@
 package lh
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -127,15 +128,15 @@ var lightPalette = Palette{
 	Nil:     "\033[38;5;240m",
 	Default: "\033[30m",
 
-	JSONKey:      "\033[34m",
-	JSONString:   "\033[38;5;94m",
-	JSONNumber:   "\033[35m",
-	JSONBool:     "\033[32m",
-	JSONNull:     "\033[38;5;240m",
-	JSONBrace:    "\033[38;5;240m",
-	InspectKey:   "\033[34m",
-	InspectValue: "\033[38;5;94m",
-	InspectMeta:  "\033[38;5;240m",
+	JSONKey:      "\033[1;34m",
+	JSONString:   "\033[1;33m",
+	JSONNumber:   "\033[1;35m",
+	JSONBool:     "\033[1;32m",
+	JSONNull:     "\033[1;37m",
+	JSONBrace:    "\033[1;37m",
+	InspectKey:   "\033[1;34m",
+	InspectValue: "\033[1;33m",
+	InspectMeta:  "\033[1;37m",
 }
 
 // brightPalette defines vibrant, high-contrast colors
@@ -258,16 +259,16 @@ var noColorPalette = Palette{
 	InspectKey: "", InspectValue: "", InspectMeta: "",
 }
 
-// builderPool is a pool of strings.Builder instances to reduce allocations
-var builderPool = sync.Pool{
+// colorBufPool is a pool of bytes.Buffer instances to reduce allocations
+var colorBufPool = sync.Pool{
 	New: func() interface{} {
-		return &strings.Builder{}
+		return &bytes.Buffer{}
 	},
 }
 
 // ColorizedHandler is a handler that outputs log entries with ANSI color codes.
 type ColorizedHandler struct {
-	w           io.Writer
+	writer      io.Writer
 	palette     Palette
 	showTime    bool
 	timeFormat  string
@@ -341,7 +342,7 @@ func WithColorTheme(theme string) ColorOption {
 // NewColorizedHandler creates a new ColorizedHandler writing to the specified writer.
 func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
 	c := &ColorizedHandler{
-		w:           w,
+		writer:      w,
 		showTime:    false,
 		timeFormat:  time.RFC3339,
 		noColor:     false,
@@ -357,6 +358,12 @@ func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
 	return c
 }
 
+func (h *ColorizedHandler) Output(w io.Writer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.writer = w
+}
+
 // Handle processes a log entry and writes it with ANSI color codes.
 func (h *ColorizedHandler) Handle(e *lx.Entry) error {
 	h.mu.Lock()
@@ -370,7 +377,7 @@ func (h *ColorizedHandler) Handle(e *lx.Entry) error {
 	case lx.ClassInspect:
 		return h.handleInspectOutput(e)
 	case lx.ClassRaw:
-		_, err := h.w.Write([]byte(e.Message))
+		_, err := h.writer.Write([]byte(e.Message))
 		return err
 	default:
 		return h.handleRegularOutput(e)
@@ -387,77 +394,77 @@ func (h *ColorizedHandler) Timestamped(enable bool, format ...string) {
 
 // handleRegularOutput handles normal log entries.
 func (h *ColorizedHandler) handleRegularOutput(e *lx.Entry) error {
-	builder := builderPool.Get().(*strings.Builder)
-	builder.Reset()
-	defer builderPool.Put(builder)
+	buf := colorBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer colorBufPool.Put(buf)
 
 	if h.showTime {
-		builder.WriteString(e.Timestamp.Format(h.timeFormat))
-		builder.WriteString(lx.Space)
+		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+		buf.WriteString(lx.Space)
 	}
 
-	h.formatNamespace(builder, e)
-	h.formatLevel(builder, e)
-	builder.WriteString(e.Message)
-	h.formatFields(builder, e)
+	h.formatNamespace(buf, e)
+	h.formatLevel(buf, e)
+	buf.WriteString(e.Message)
+	h.formatFields(buf, e)
 
 	if len(e.Stack) > 0 {
-		h.formatStack(builder, e.Stack)
+		h.formatStack(buf, e.Stack)
 	}
 
 	if e.Level != lx.LevelNone {
-		builder.WriteString(lx.Newline)
+		buf.WriteString(lx.Newline)
 	}
 
-	_, err := h.w.Write([]byte(builder.String()))
+	_, err := h.writer.Write(buf.Bytes())
 	return err
 }
 
 // handleJSONOutput handles JSON log entries.
 func (h *ColorizedHandler) handleJSONOutput(e *lx.Entry) error {
-	builder := builderPool.Get().(*strings.Builder)
-	builder.Reset()
-	defer builderPool.Put(builder)
+	buf := colorBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer colorBufPool.Put(buf)
 
 	if h.showTime {
-		builder.WriteString(e.Timestamp.Format(h.timeFormat))
-		builder.WriteString(lx.Newline)
+		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+		buf.WriteString(lx.Newline)
 	}
 
 	if e.Namespace != "" {
-		h.formatNamespace(builder, e)
-		h.formatLevel(builder, e)
+		h.formatNamespace(buf, e)
+		h.formatLevel(buf, e)
 	}
 
-	h.colorizeJSON(builder, e.Message)
-	builder.WriteString(lx.Newline)
+	h.colorizeJSON(buf, e.Message)
+	buf.WriteString(lx.Newline)
 
-	_, err := h.w.Write([]byte(builder.String()))
+	_, err := h.writer.Write(buf.Bytes())
 	return err
 }
 
 // handleInspectOutput handles inspect log entries.
 func (h *ColorizedHandler) handleInspectOutput(e *lx.Entry) error {
-	builder := builderPool.Get().(*strings.Builder)
-	builder.Reset()
-	defer builderPool.Put(builder)
+	buf := colorBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer colorBufPool.Put(buf)
 
 	if h.showTime {
-		builder.WriteString(e.Timestamp.Format(h.timeFormat))
-		builder.WriteString(lx.Space)
+		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+		buf.WriteString(lx.Space)
 	}
 
-	h.formatNamespace(builder, e)
-	h.formatLevel(builder, e)
-	h.colorizeInspect(builder, e.Message)
-	builder.WriteString(lx.Newline)
+	h.formatNamespace(buf, e)
+	h.formatLevel(buf, e)
+	h.colorizeInspect(buf, e.Message)
+	buf.WriteString(lx.Newline)
 
-	_, err := h.w.Write([]byte(builder.String()))
+	_, err := h.writer.Write(buf.Bytes())
 	return err
 }
 
 // colorizeJSON applies syntax highlighting to JSON strings without changing formatting
-func (h *ColorizedHandler) colorizeJSON(b *strings.Builder, jsonStr string) {
+func (h *ColorizedHandler) colorizeJSON(b *bytes.Buffer, jsonStr string) {
 	inString := false
 	escapeNext := false
 
@@ -561,7 +568,7 @@ func (h *ColorizedHandler) colorizeJSON(b *strings.Builder, jsonStr string) {
 }
 
 // colorizeInspect applies syntax highlighting to inspect output
-func (h *ColorizedHandler) colorizeInspect(b *strings.Builder, inspectStr string) {
+func (h *ColorizedHandler) colorizeInspect(b *bytes.Buffer, inspectStr string) {
 	lines := strings.Split(inspectStr, "\n")
 
 	for lineIdx, line := range lines {
@@ -670,7 +677,7 @@ func (h *ColorizedHandler) colorizeInspect(b *strings.Builder, inspectStr string
 }
 
 // formatNamespace formats the namespace with ANSI color codes.
-func (h *ColorizedHandler) formatNamespace(b *strings.Builder, e *lx.Entry) {
+func (h *ColorizedHandler) formatNamespace(b *bytes.Buffer, e *lx.Entry) {
 	if e.Namespace == "" {
 		return
 	}
@@ -696,7 +703,7 @@ func (h *ColorizedHandler) formatNamespace(b *strings.Builder, e *lx.Entry) {
 }
 
 // formatLevel formats the log level with ANSI color codes.
-func (h *ColorizedHandler) formatLevel(b *strings.Builder, e *lx.Entry) {
+func (h *ColorizedHandler) formatLevel(b *bytes.Buffer, e *lx.Entry) {
 	color := map[lx.LevelType]string{
 		lx.LevelDebug: h.palette.Debug,
 		lx.LevelInfo:  h.palette.Info,
@@ -713,7 +720,7 @@ func (h *ColorizedHandler) formatLevel(b *strings.Builder, e *lx.Entry) {
 }
 
 // formatFields formats the log entry's fields in sorted order.
-func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
+func (h *ColorizedHandler) formatFields(b *bytes.Buffer, e *lx.Entry) {
 	if len(e.Fields) == 0 {
 		return
 	}
@@ -747,7 +754,7 @@ func (h *ColorizedHandler) formatFields(b *strings.Builder, e *lx.Entry) {
 }
 
 // formatFieldValue formats a field value with type-based ANSI color codes.
-func (h *ColorizedHandler) formatFieldValue(b *strings.Builder, value interface{}) {
+func (h *ColorizedHandler) formatFieldValue(b *bytes.Buffer, value interface{}) {
 	// If field coloring is disabled, just write the value
 	if !h.colorFields {
 		fmt.Fprint(b, value)
@@ -817,7 +824,7 @@ func (h *ColorizedHandler) formatFieldValue(b *strings.Builder, value interface{
 }
 
 // formatDuration formats a duration in a human-readable way
-func (h *ColorizedHandler) formatDuration(b *strings.Builder, d time.Duration) {
+func (h *ColorizedHandler) formatDuration(b *bytes.Buffer, d time.Duration) {
 	if d < time.Microsecond {
 		b.WriteString(d.String())
 	} else if d < time.Millisecond {
@@ -838,7 +845,7 @@ func (h *ColorizedHandler) formatDuration(b *strings.Builder, d time.Duration) {
 }
 
 // formatStack formats a stack trace with ANSI color codes.
-func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
+func (h *ColorizedHandler) formatStack(b *bytes.Buffer, stack []byte) {
 	b.WriteString("\n")
 	b.WriteString(h.palette.Header)
 	b.WriteString("[stack]")
@@ -907,19 +914,19 @@ func (h *ColorizedHandler) formatStack(b *strings.Builder, stack []byte) {
 
 // handleDumpOutput formats hex dump output with ANSI color codes.
 func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
-	builder := builderPool.Get().(*strings.Builder)
-	builder.Reset()
-	defer builderPool.Put(builder)
+	buf := colorBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer colorBufPool.Put(buf)
 
 	if h.showTime {
-		builder.WriteString(e.Timestamp.Format(h.timeFormat))
-		builder.WriteString(lx.Newline)
+		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+		buf.WriteString(lx.Newline)
 	}
 
-	builder.WriteString(h.palette.Title)
-	builder.WriteString("---- BEGIN DUMP ----")
-	builder.WriteString(h.palette.Reset)
-	builder.WriteString("\n")
+	buf.WriteString(h.palette.Title)
+	buf.WriteString("---- BEGIN DUMP ----")
+	buf.WriteString(h.palette.Reset)
+	buf.WriteString("\n")
 
 	lines := strings.Split(e.Message, "\n")
 	length := len(lines)
@@ -927,42 +934,42 @@ func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
 		if strings.HasPrefix(line, "pos ") {
 			parts := strings.SplitN(line, "hex:", 2)
 			if len(parts) == 2 {
-				builder.WriteString(h.palette.Pos)
-				builder.WriteString(parts[0])
-				builder.WriteString(h.palette.Reset)
+				buf.WriteString(h.palette.Pos)
+				buf.WriteString(parts[0])
+				buf.WriteString(h.palette.Reset)
 
 				hexAscii := strings.SplitN(parts[1], "'", 2)
-				builder.WriteString(h.palette.Hex)
-				builder.WriteString("hex:")
-				builder.WriteString(hexAscii[0])
-				builder.WriteString(h.palette.Reset)
+				buf.WriteString(h.palette.Hex)
+				buf.WriteString("hex:")
+				buf.WriteString(hexAscii[0])
+				buf.WriteString(h.palette.Reset)
 
 				if len(hexAscii) > 1 {
-					builder.WriteString(h.palette.Ascii)
-					builder.WriteString("'")
-					builder.WriteString(hexAscii[1])
-					builder.WriteString(h.palette.Reset)
+					buf.WriteString(h.palette.Ascii)
+					buf.WriteString("'")
+					buf.WriteString(hexAscii[1])
+					buf.WriteString(h.palette.Reset)
 				}
 			}
 		} else if strings.HasPrefix(line, "Dumping value of type:") {
-			builder.WriteString(h.palette.Header)
-			builder.WriteString(line)
-			builder.WriteString(h.palette.Reset)
+			buf.WriteString(h.palette.Header)
+			buf.WriteString(line)
+			buf.WriteString(h.palette.Reset)
 		} else {
-			builder.WriteString(line)
+			buf.WriteString(line)
 		}
 
 		if i < length-1 {
-			builder.WriteString("\n")
+			buf.WriteString("\n")
 		}
 	}
 
-	builder.WriteString(h.palette.Title)
-	builder.WriteString("---- END DUMP ----")
-	builder.WriteString(h.palette.Reset)
-	builder.WriteString("\n")
+	buf.WriteString(h.palette.Title)
+	buf.WriteString("---- END DUMP ----")
+	buf.WriteString(h.palette.Reset)
+	buf.WriteString("\n")
 
-	_, err := h.w.Write([]byte(builder.String()))
+	_, err := h.writer.Write(buf.Bytes())
 	return err
 }
 
