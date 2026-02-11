@@ -584,8 +584,8 @@ func Dbg(any ...interface{}) {
 // Example:
 //
 //	ll.Dump([]byte{0x41, 0x42}) // Outputs hex/ASCII dump
-func Dump(any interface{}) {
-	defaultLogger.Dump(any)
+func Dump(values ...interface{}) {
+	defaultLogger.Dump(values...)
 }
 
 // Enabled returns whether the default logger is enabled for logging.
