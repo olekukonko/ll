@@ -1,7 +1,6 @@
 package ll
 
 import (
-	"bufio"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -242,22 +241,6 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 	}
 
 	return newLogger
-}
-
-// Dbg logs debug information, including the source file, line number, and expression
-// value, capturing the calling line of code. It is useful for debugging without temporary
-// print statements.
-// Example:
-//
-//	x := 42
-//	logger.Dbg(x) // Output: [file.go:123] x = 42
-func (l *Logger) Dbg(values ...interface{}) {
-	// Skip logging if Info level is not enabled
-	if !l.shouldLog(lx.LevelInfo) {
-		return
-	}
-
-	l.dbg(2, values...)
 }
 
 // Debug logs a message at Debug level, formatting it and delegating to the internal
@@ -1328,82 +1311,6 @@ func (l *Logger) Warnf(format string, args ...any) {
 	l.Warn(fmt.Sprintf(format, args...))
 }
 
-// dbg is an internal helper for Dbg, logging debug information with source file and line
-// number, extracting the calling line of code. It is thread-safe via the log method.
-// Example (internal usage):
-//
-//	logger.Dbg(x) // Calls dbg(2, x)
-func (l *Logger) dbg(skip int, values ...interface{}) {
-	// Resolve caller frame robustly.
-	file, line, ok := callerFrame(skip)
-	if !ok {
-		// No frame → still log values
-		for _, exp := range values {
-			l.log(lx.LevelInfo, lx.ClassText, fmt.Sprintf("[?:?] %+v", exp), nil, false)
-		}
-		return
-	}
-
-	shortFile := file
-	if idx := strings.LastIndex(file, "/"); idx >= 0 {
-		shortFile = file[idx+1:]
-	}
-
-	// Try to read the specific source line (best-effort).
-	srcLine := ""
-	if f, err := os.Open(file); err == nil {
-		sc := bufio.NewScanner(f)
-		i := 1
-		for sc.Scan() {
-			if i == line {
-				srcLine = sc.Text()
-				break
-			}
-			i++
-		}
-		_ = f.Close()
-		// Ignore scan error; srcLine stays empty and we fallback.
-	}
-
-	// Extract expression text best-effort from srcLine.
-	// If it fails, we fallback to just printing the value.
-	expr := ""
-	if srcLine != "" {
-		// Prefer extracting inside Dbg(...)
-		if a := strings.Index(srcLine, "Dbg("); a >= 0 {
-			rest := srcLine[a+len("Dbg("):]
-			if b := strings.LastIndex(rest, ")"); b >= 0 {
-				expr = strings.TrimSpace(rest[:b])
-			}
-		} else {
-			// Fallback: anything inside first (...) on the line
-			a := strings.Index(srcLine, "(")
-			b := strings.LastIndex(srcLine, ")")
-			if a >= 0 && b > a {
-				expr = strings.TrimSpace(srcLine[a+1 : b])
-			}
-		}
-	}
-
-	for _, exp := range values {
-		var out string
-		if expr != "" {
-			out = fmt.Sprintf("[%s:%d] %s = %+v", shortFile, line, expr, exp)
-		} else {
-			// IMPORTANT: this is what makes it work in compiled binaries
-			// even when the source file is not present.
-			out = fmt.Sprintf("[%s:%d] %+v", shortFile, line, exp)
-		}
-
-		switch exp.(type) {
-		case error:
-			l.log(lx.LevelError, lx.ClassText, out, nil, false)
-		default:
-			l.log(lx.LevelInfo, lx.ClassText, out, nil, false)
-		}
-	}
-}
-
 // joinPath joins a base path and a relative path using the logger's separator, handling
 // empty base or relative paths. It is used internally for namespace path construction.
 // Example (internal usage):
@@ -1550,33 +1457,4 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 	}
 
 	return true
-}
-
-// callerFrame tries to resolve the *user* callsite even when inlining changes.
-// It starts from "skip" but then walks forward until it finds a frame outside
-// this package (ll).
-func callerFrame(skip int) (file string, line int, ok bool) {
-	// +2 to skip callerFrame + dbg itself.
-	pcs := make([]uintptr, 32)
-	n := runtime.Callers(skip+2, pcs)
-	if n == 0 {
-		return "", 0, false
-	}
-
-	frames := runtime.CallersFrames(pcs[:n])
-	for {
-		fr, more := frames.Next()
-
-		// fr.Function looks like: "github.com/you/mod/ll.(*Logger).Dbg"
-		// We want the first frame that is NOT inside package ll.
-		// Tweak this string check if your module path differs.
-		if fr.Function == "" || !strings.Contains(fr.Function, "/ll.") && !strings.Contains(fr.Function, ".ll.") {
-			return fr.File, fr.Line, true
-		}
-
-		if !more {
-			// Fallback: return the last frame we saw
-			return fr.File, fr.Line, fr.File != ""
-		}
-	}
 }
