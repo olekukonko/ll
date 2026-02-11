@@ -54,6 +54,7 @@ const (
 	RawString     = "RAW"
 	InspectString = "INSPECT"
 	DbgString     = "DBG"
+	TimedString   = "TIMED"
 )
 
 // Log class constants, defining the type of log entry.
@@ -67,6 +68,7 @@ const (
 	ClassRaw                      // Raw entries for unformatted output
 	ClassInspect                  // Inspect entries for debugging
 	ClassDbg                      // Inspect entries for debugging
+	ClassTimed                    // Inspect entries for debugging
 	ClassUnknown                  // Unknown output
 )
 

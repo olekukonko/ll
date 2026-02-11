@@ -41,6 +41,7 @@ type Logger struct {
 	entries         atomic.Int64  // Tracks total log entries sent to handler
 	fatalExits      bool
 	fatalStack      bool
+	labels          atomic.Pointer[[]string]
 }
 
 // New creates a new Logger with the given namespace and optional configurations.
@@ -784,6 +785,28 @@ func (l *Logger) Len() int64 {
 	return l.entries.Load()
 }
 
+// Labels temporarily attaches one or more label names to the logger for the next log entry.
+// Labels are typically used for metrics, benchmarking, tracing, or categorizing logs in a structured way.
+//
+// The labels are stored atomically and intended to be short-lived, applying only to the next
+// log operation (or until overwritten by a subsequent call to Labels). Multiple labels can
+// be provided as separate string arguments.
+//
+// Example usage:
+//
+//	logger := New("app").Enable()
+//
+//	// Add labels for a specific operation
+//	logger.Labels("load_users", "process_orders").Measure(func() {
+//	    // ... perform work ...
+//	}, func() {
+//	    // ... optional callback ...
+//	})
+func (l *Logger) Labels(names ...string) *Logger {
+	l.labels.Store(&names) // store temporarily
+	return l
+}
+
 // Level sets the minimum log level, ignoring messages below it. It is thread-safe using
 // a write lock and returns the logger for chaining.
 // Example:
@@ -861,32 +884,6 @@ func (l *Logger) mark(skip int, names ...string) {
 	// Format as [filename:line]
 	out := fmt.Sprintf("[*%s*]: [%s:%d]\n", name, shortFile, line)
 	l.log(lx.LevelInfo, lx.ClassRaw, out, nil, false)
-}
-
-// Measure benchmarks function execution, logging the duration at Info level with a
-// "duration" field. It is thread-safe via Fields and log methods.
-// Example:
-//
-//	logger := New("app").Enable()
-//	duration := logger.Measure(func() { time.Sleep(time.Millisecond) })
-//	// Output: [app] INFO: function executed [duration=~1ms]
-func (l *Logger) Measure(fns ...func()) time.Duration {
-	start := time.Now()
-
-	for _, fn := range fns {
-		if fn != nil {
-			fn()
-		}
-	}
-
-	duration := time.Since(start)
-	l.Fields(
-		"duration_ns", duration.Nanoseconds(),
-		"duration", duration.String(),
-		"duration_ms", fmt.Sprintf("%.3fms", float64(duration.Nanoseconds())/1e6),
-	).Infof("execution completed")
-
-	return duration
 }
 
 // Namespace creates a child logger with a sub-namespace appended to the current path,

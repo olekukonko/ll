@@ -470,6 +470,37 @@ func Measure(fns ...func()) time.Duration {
 	return defaultLogger.Measure(fns...)
 }
 
+// Labels temporarily attaches one or more label names to the logger for the next log entry.
+// Labels are typically used for metrics, benchmarking, tracing, or categorizing logs in a structured way.
+//
+// The labels are stored atomically and intended to be short-lived, applying only to the next
+// log operation (or until overwritten by a subsequent call to Labels). Multiple labels can
+// be provided as separate string arguments.
+//
+// Example usage:
+//
+//	logger := New("app").Enable()
+//
+//	// Add labels for a specific operation
+//	logger.Labels("load_users", "process_orders").Measure(func() {
+//	    // ... perform work ...
+//	}, func() {
+//	    // ... optional callback ...
+//	})
+func Labels(names ...string) *Logger {
+	return defaultLogger.Labels(names...)
+}
+
+// Since creates a timer that will log the duration when completed
+// If startTime is provided, uses that as the start time; otherwise uses time.Now()
+//
+//	defer logger.Since().Info("request")        // Auto-start
+//	logger.Since(start).Info("request")         // Manual timing
+//	logger.Since().If(debug).Debug("timing")    // Conditional
+func Since(start ...time.Time) *SinceBuilder {
+	return defaultLogger.Since(start...)
+}
+
 // Benchmark logs the duration since a start time at Info level using the default logger.
 // It calculates the time elapsed since the provided start time and logs it with "start",
 // "end", and "duration" fields. Thread-safe via the Logger’s mutex.

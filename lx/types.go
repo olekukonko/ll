@@ -37,7 +37,7 @@ func (l LevelType) String() string {
 }
 
 func (l LevelType) Name(class ClassType) string {
-	if class == ClassRaw || class == ClassDump || class == ClassInspect || class == ClassDbg {
+	if class == ClassRaw || class == ClassDump || class == ClassInspect || class == ClassDbg || class == ClassTimed {
 		return class.String()
 	}
 	return l.String()
@@ -116,6 +116,8 @@ func (t ClassType) String() string {
 		return DbgString
 	case ClassRaw:
 		return RawString
+	case ClassTimed:
+		return TimedString
 	default:
 		return UnknownString
 	}
