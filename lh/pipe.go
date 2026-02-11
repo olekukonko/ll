@@ -23,7 +23,6 @@ import (
 //	handler := lh.Pipe(base,
 //	    lh.NewDedup(2*time.Second),    // 1. Deduplicate first
 //	    lh.NewRateLimit(10, time.Second), // 2. Then rate limit
-//	    lh.AddTimestamp(),              // 3. Then add timestamps
 //	)
 //	logger := lx.NewLogger(handler)
 //
