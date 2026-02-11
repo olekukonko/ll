@@ -36,6 +36,13 @@ func (l LevelType) String() string {
 	}
 }
 
+func (l LevelType) Name(class ClassType) string {
+	if class == ClassRaw || class == ClassDump || class == ClassInspect || class == ClassDbg {
+		return class.String()
+	}
+	return l.String()
+}
+
 // LevelParse converts a string to its corresponding LevelType.
 // It parses a string (case-insensitive) and returns the corresponding LevelType, defaulting to
 // LevelUnknown for unrecognized strings. Supports "WARNING" as an alias for "WARN".
@@ -94,13 +101,19 @@ type ClassType int
 func (t ClassType) String() string {
 	switch t {
 	case ClassText:
+
 		return TextString
 	case ClassJSON:
+
 		return JSONString
 	case ClassDump:
 		return DumpString
 	case ClassSpecial:
 		return SpecialString
+	case ClassInspect:
+		return InspectString
+	case ClassDbg:
+		return DbgString
 	case ClassRaw:
 		return RawString
 	default:

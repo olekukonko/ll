@@ -11,7 +11,7 @@ const (
 	Arrow        = "→"  // Arrow for NestedPath style namespaces (e.g., [parent]→[child])
 	LeftBracket  = "["  // Opening bracket for namespaces and fields (e.g., [app])
 	RightBracket = "]"  // Closing bracket for namespaces and fields (e.g., [app])
-	Colon        = ":"  // Separator after namespace or level (e.g., [app]: INFO:)
+	Colon        = ":"  // Separator after namespace or level (e.g., [app]: INFO:) can also be "|"
 	Dot          = "."  // Separator for namespace paths (e.g., "parent.child")
 	Newline      = "\n" // Newline for separating log entries or stack trace lines
 )
@@ -52,6 +52,8 @@ const (
 	DumpString    = "DUMP"
 	SpecialString = "SPECIAL"
 	RawString     = "RAW"
+	InspectString = "INSPECT"
+	DbgString     = "DBG"
 )
 
 // Log class constants, defining the type of log entry.
@@ -64,6 +66,7 @@ const (
 	ClassSpecial                  // Special entries for custom or non-standard logs
 	ClassRaw                      // Raw entries for unformatted output
 	ClassInspect                  // Inspect entries for debugging
+	ClassDbg                      // Inspect entries for debugging
 	ClassUnknown                  // Unknown output
 )
 

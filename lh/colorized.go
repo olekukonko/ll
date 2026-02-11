@@ -713,8 +713,10 @@ func (h *ColorizedHandler) formatLevel(b *bytes.Buffer, e *lx.Entry) {
 	}[e.Level]
 
 	b.WriteString(color)
-	b.WriteString(rightPad(e.Level.String(), 5))
+	b.WriteString(rightPad(e.Level.Name(e.Class), 8))
+	b.WriteString(e.Level.Name(e.Class))
 	b.WriteString(h.palette.Reset)
+	// b.WriteString(lx.Space)
 	b.WriteString(lx.Colon)
 	b.WriteString(lx.Space)
 }
@@ -967,7 +969,7 @@ func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
 	buf.WriteString(h.palette.Title)
 	buf.WriteString("---- END DUMP ----")
 	buf.WriteString(h.palette.Reset)
-	buf.WriteString("\n")
+	buf.WriteString("\n\n")
 
 	_, err := h.writer.Write(buf.Bytes())
 	return err

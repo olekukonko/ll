@@ -24,7 +24,7 @@ var sourceCache = newFileLRU(128)
 
 type fileLRU struct {
 	capacity int
-	mu       sync.Mutex // Simplifies logic compared to RWMutex for LRU updates
+	mu       sync.Mutex
 	list     *list.List
 	items    map[string]*list.Element
 }
@@ -53,7 +53,6 @@ func (c *fileLRU) getLine(file string, line int) (string, bool) {
 	// 1. Cache Hit
 	if elem, ok := c.items[file]; ok {
 		c.list.MoveToFront(elem)
-		// If lines is nil, it means we previously failed to read this file (negative cache)
 		item := elem.Value.(*fileItem)
 		if item.lines == nil {
 			return "", false
@@ -83,7 +82,6 @@ func (c *fileLRU) getLine(file string, line int) (string, bool) {
 	}
 
 	// 4. Store (Positive or Negative Cache)
-	// We store 'nil' lines if error occurred to prevent repeated disk hits
 	item := &fileItem{
 		key:   file,
 		lines: lines,
@@ -124,8 +122,8 @@ func nthLine(lines []string, n int) (string, bool) {
 // Example:
 //
 //	x := 42
-//	logger.Dbg("value", x)
-//	Output: [file.go:123] "value", x = "value", 42
+//	logger.Dbg("val", x)
+//	Output: [file.go:123] "val" = "val", x = 42
 func (l *Logger) Dbg(values ...interface{}) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
@@ -174,23 +172,83 @@ func (l *Logger) dbg(skip int, values ...interface{}) {
 		}
 	}
 
-	// Aggregate values into a single string to avoid double logging
-	var valBuilder strings.Builder
-	for i, v := range values {
-		if i > 0 {
-			valBuilder.WriteString(", ")
-		}
-		valBuilder.WriteString(fmt.Sprintf("%+v", v))
-	}
+	// Format output
+	var outBuilder strings.Builder
+	outBuilder.WriteString(fmt.Sprintf("[%s:%d] ", shortFile, line))
 
-	var out string
+	// Attempt to split expressions to map 1:1 with values
+	var parts []string
 	if expr != "" {
-		out = fmt.Sprintf("[%s:%d] %s = %s", shortFile, line, expr, valBuilder.String())
-	} else {
-		out = fmt.Sprintf("[%s:%d] %s", shortFile, line, valBuilder.String())
+		parts = splitExpressions(expr)
 	}
 
-	l.log(lx.LevelInfo, lx.ClassText, out, nil, false)
+	// If the number of extracted expressions matches the number of values,
+	// print them as "expr = value". Otherwise, fall back to "expr = val1, val2".
+	if len(parts) == len(values) {
+		for i, v := range values {
+			if i > 0 {
+				outBuilder.WriteString(", ")
+			}
+			outBuilder.WriteString(fmt.Sprintf("%s = %+v", parts[i], v))
+		}
+	} else {
+		if expr != "" {
+			outBuilder.WriteString(expr)
+			outBuilder.WriteString(" = ")
+		}
+		for i, v := range values {
+			if i > 0 {
+				outBuilder.WriteString(", ")
+			}
+			outBuilder.WriteString(fmt.Sprintf("%+v", v))
+		}
+	}
+
+	l.log(lx.LevelInfo, lx.ClassDbg, outBuilder.String(), nil, false)
+}
+
+// splitExpressions splits a comma-separated string of expressions,
+// respecting nested parentheses, brackets, braces, and quotes.
+// Example: "a, fn(b, c), d" -> ["a", "fn(b, c)", "d"]
+func splitExpressions(s string) []string {
+	var parts []string
+	var current strings.Builder
+	depth := 0       // Tracks nested (), [], {}
+	inQuote := false // Tracks string literals
+	var quoteChar rune
+
+	for _, r := range s {
+		switch {
+		case inQuote:
+			current.WriteRune(r)
+			if r == quoteChar {
+				// We rely on the fact that valid Go source won't have unescaped quotes easily
+				// accessible here without complex parsing, but for simple Dbg calls this suffices.
+				// A robust parser handles `\"`, but simple state toggling covers 99% of debug cases.
+				inQuote = false
+			}
+		case r == '"' || r == '\'':
+			inQuote = true
+			quoteChar = r
+			current.WriteRune(r)
+		case r == '(' || r == '{' || r == '[':
+			depth++
+			current.WriteRune(r)
+		case r == ')' || r == '}' || r == ']':
+			depth--
+			current.WriteRune(r)
+		case r == ',' && depth == 0:
+			// Split point
+			parts = append(parts, strings.TrimSpace(current.String()))
+			current.Reset()
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		parts = append(parts, strings.TrimSpace(current.String()))
+	}
+	return parts
 }
 
 // -----------------------------------------------------------------------------
@@ -210,7 +268,6 @@ func callerFrame(skip int) (file string, line int, ok bool) {
 	frames := runtime.CallersFrames(pcs[:n])
 	for {
 		fr, more := frames.Next()
-
 		// fr.Function looks like: "github.com/you/mod/ll.(*Logger).Dbg"
 		// We want the first frame that is NOT inside package ll.
 		if fr.Function == "" || !strings.Contains(fr.Function, "/ll.") && !strings.Contains(fr.Function, ".ll.") {

@@ -157,7 +157,8 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 		}
 	}
 
-	buf.WriteString(e.Level.String())
+	buf.WriteString(e.Level.Name(e.Class))
+	// buf.WriteString(lx.Space)
 	buf.WriteString(lx.Colon)
 	buf.WriteString(lx.Space)
 	buf.WriteString(e.Message)
@@ -206,7 +207,7 @@ func (h *TextHandler) handleDumpOutput(e *lx.Entry) error {
 
 	buf.WriteString("---- BEGIN DUMP ----\n")
 	buf.WriteString(e.Message)
-	buf.WriteString("---- END DUMP ----\n")
+	buf.WriteString("---- END DUMP ----\n\n")
 
 	_, err := h.writer.Write(buf.Bytes())
 	return err
