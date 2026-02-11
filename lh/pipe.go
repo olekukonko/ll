@@ -1,6 +1,8 @@
 package lh
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/olekukonko/ll/lx"
@@ -35,34 +37,40 @@ func Pipe(h lx.Handler, wraps ...lx.Wrap) lx.Handler {
 	return h
 }
 
+// PipeDedup returns a wrapper that applies deduplication to the handler.
 func PipeDedup(ttl time.Duration, opts ...DedupOpt[lx.Handler]) lx.Wrap {
 	return func(next lx.Handler) lx.Handler {
 		return NewDedup(next, ttl, opts...)
 	}
 }
 
+// PipeBuffer returns a wrapper that applies buffering to the handler.
 func PipeBuffer(opts ...BufferingOpt) lx.Wrap {
 	return func(next lx.Handler) lx.Handler {
 		return NewBuffered(next, opts...)
 	}
 }
 
-func PipeRotate(
-	maxSizeBytes int64,
-	src RotateSource,
-) lx.Wrap {
+// PipeRotate returns a wrapper that applies log rotation.
+// Ideally, the 'next' handler should be one that writes to a file (like TextHandler or JSONHandler).
+//
+// If the underlying handler does not implement lx.HandlerOutputter (cannot change output destination),
+// or if rotation initialization fails, this will log a warning to stderr and return the
+// original handler unmodified to prevent application crashes.
+func PipeRotate(maxSizeBytes int64, src RotateSource) lx.Wrap {
 	return func(next lx.Handler) lx.Handler {
-		h, ok := next.(interface {
-			lx.HandlerOutputter
-			lx.Outputter
-		})
+		// Attempt to cast to HandlerOutputter (Handler + Outputter interface)
+		h, ok := next.(lx.HandlerOutputter)
 		if !ok {
-			panic("PipeRotate requires handler with SetOutput(io.Writer)")
+			fmt.Fprintf(os.Stderr, "ll/lh: PipeRotate skipped - handler does not implement SetOutput(io.Writer)\n")
+			return next
 		}
 
+		// Initialize the rotating handler
 		r, err := NewRotating(h, maxSizeBytes, src)
 		if err != nil {
-			panic(err)
+			fmt.Fprintf(os.Stderr, "ll/lh: PipeRotate initialization failed: %v\n", err)
+			return next
 		}
 		return r
 	}
