@@ -1,11 +1,9 @@
 package ll
 
 import (
-	"os"
 	"sync/atomic"
 	"time"
 
-	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
 )
 
@@ -14,16 +12,7 @@ import (
 // a logger instance. The logger is initialized with default settings: enabled, Debug level,
 // flat namespace style, and a text handler to os.Stdout. It is thread-safe due to the Logger
 // struct’s mutex.
-var defaultLogger = &Logger{
-	enabled:         true,                         // Initially enabled
-	level:           lx.LevelDebug,                // Minimum log level set to Debug
-	namespaces:      defaultStore,                 // Shared namespace store for enable/disable states
-	context:         make(lx.Fields, 0, 10),       // Empty context for global fields
-	style:           lx.FlatPath,                  // Flat namespace style (e.g., [parent/child])
-	handler:         lh.NewTextHandler(os.Stdout), // Default text handler to os.Stdout
-	middleware:      make([]Middleware, 0),        // Empty middleware chain
-	stackBufferSize: 4096,                         // Buffer size for stack traces
-}
+var defaultLogger = New("")
 
 // Handler sets the handler for the default logger.
 // It configures the output destination and format (e.g., text, JSON) for logs emitted by

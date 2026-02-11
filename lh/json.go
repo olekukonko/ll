@@ -24,11 +24,11 @@ var jsonBufPool = sync.Pool{
 // stack traces or dump segments, writing the result to the provided writer.
 // Thread-safe with a mutex to protect concurrent writes.
 type JSONHandler struct {
-	writer   io.Writer         // Destination for JSON output
-	timeFmt  string            // Format for timestamp (default: RFC3339Nano)
-	pretty   bool              // Enable pretty printing with indentation if true
-	fieldMap map[string]string // Optional mapping for field names (not used in provided code)
-	mu       sync.Mutex        // Protects concurrent access to writer
+	writer  io.Writer // Destination for JSON output
+	timeFmt string    // Format for timestamp (default: RFC3339Nano)
+	pretty  bool      // Enable pretty printing with indentation if true
+	//fieldMap map[string]string // Optional mapping for field names (not used in provided code)
+	mu sync.Mutex // Protects concurrent access to writer
 }
 
 // JsonOutput represents the JSON structure for a log entry.
