@@ -1,4 +1,3 @@
-// lh/text.go
 package lh
 
 import (

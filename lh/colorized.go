@@ -713,7 +713,7 @@ func (h *ColorizedHandler) formatLevel(b *bytes.Buffer, e *lx.Entry) {
 	}[e.Level]
 
 	b.WriteString(color)
-	b.WriteString(rightPad(e.Level.Name(e.Class), 8))
+	//b.WriteString(rightPad(e.Level.Name(e.Class), 8))
 	b.WriteString(e.Level.Name(e.Class))
 	b.WriteString(h.palette.Reset)
 	// b.WriteString(lx.Space)
