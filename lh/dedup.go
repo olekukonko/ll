@@ -11,11 +11,6 @@ import (
 	"github.com/olekukonko/ll/lx"
 )
 
-// Deduper defines how to calculate a deduplication key for an entry.
-type Deduper interface {
-	Calculate(*lx.Entry) uint64
-}
-
 // Dedup is a log handler that suppresses duplicate entries within a TTL window.
 // It wraps another handler and filters out repeated log entries that match
 // within the deduplication period.
@@ -24,7 +19,7 @@ type Dedup struct {
 
 	ttl            time.Duration
 	cleanupEvery   time.Duration
-	keyFn          Deduper
+	keyFn          lx.Deduper
 	maxKeys        int
 	excludedFields map[string]struct{} // Fields to exclude from default key hash (only for default deduper)
 
@@ -202,7 +197,7 @@ type defaultDedup struct {
 	ignoreFields map[string]struct{}
 }
 
-func NewDefaultDedup() Deduper {
+func NewDefaultDedup() lx.Deduper {
 	return &defaultDedup{ignoreFields: make(map[string]struct{})}
 }
 
