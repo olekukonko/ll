@@ -1,22 +1,32 @@
 package lh
 
 import (
+	"bytes"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/olekukonko/ll/lx"
 )
 
-// Dedup is a log handler that suppresses duplicate entries within a TTL window.
-// It wraps another handler (H) and filters out repeated log entries that match
-// within the deduplication period.
-type Dedup[H lx.Handler] struct {
-	next H
+// Deduper defines how to calculate a deduplication key for an entry.
+type Deduper interface {
+	Calculate(*lx.Entry) uint64
+}
 
-	ttl          time.Duration
-	cleanupEvery time.Duration
-	keyFn        func(*lx.Entry) uint64
-	maxKeys      int
+// Dedup is a log handler that suppresses duplicate entries within a TTL window.
+// It wraps another handler and filters out repeated log entries that match
+// within the deduplication period.
+type Dedup struct {
+	next lx.Handler
+
+	ttl            time.Duration
+	cleanupEvery   time.Duration
+	keyFn          Deduper
+	maxKeys        int
+	excludedFields map[string]struct{} // Fields to exclude from default key hash (only for default deduper)
 
 	// shards reduce lock contention by partitioning the key space
 	shards [32]dedupShard
@@ -32,16 +42,26 @@ type dedupShard struct {
 }
 
 // DedupOpt configures a Dedup handler.
-type DedupOpt[H lx.Handler] func(*Dedup[H])
+type DedupOpt func(*Dedup)
 
 // WithDedupKeyFunc customizes how deduplication keys are generated.
-func WithDedupKeyFunc[H lx.Handler](fn func(*lx.Entry) uint64) DedupOpt[H] {
-	return func(d *Dedup[H]) { d.keyFn = fn }
+// The provided function will be wrapped to implement Deduper.
+func WithDedupKeyFunc(fn func(*lx.Entry) uint64) DedupOpt {
+	return func(d *Dedup) {
+		d.keyFn = dedupKeyFunc(fn)
+	}
+}
+
+// dedupKeyFunc is a type that wraps a plain function to implement Deduper.
+type dedupKeyFunc func(*lx.Entry) uint64
+
+func (f dedupKeyFunc) Calculate(e *lx.Entry) uint64 {
+	return f(e)
 }
 
 // WithDedupCleanupInterval sets how often expired deduplication keys are purged.
-func WithDedupCleanupInterval[H lx.Handler](every time.Duration) DedupOpt[H] {
-	return func(d *Dedup[H]) {
+func WithDedupCleanupInterval(every time.Duration) DedupOpt {
+	return func(d *Dedup) {
 		if every > 0 {
 			d.cleanupEvery = every
 		}
@@ -49,25 +69,41 @@ func WithDedupCleanupInterval[H lx.Handler](every time.Duration) DedupOpt[H] {
 }
 
 // WithDedupMaxKeys sets a soft limit on tracked deduplication keys.
-func WithDedupMaxKeys[H lx.Handler](max int) DedupOpt[H] {
-	return func(d *Dedup[H]) {
+func WithDedupMaxKeys(max int) DedupOpt {
+	return func(d *Dedup) {
 		if max > 0 {
 			d.maxKeys = max
 		}
 	}
 }
 
+// WithDedupIgnore specifies fields to ignore in the default key function.
+// Useful for excluding volatile fields like "duration" or "timestamp".
+// Only applies if using the default deduper (not a custom keyFn via WithDedupKeyFunc).
+func WithDedupIgnore(fields ...string) DedupOpt {
+	return func(d *Dedup) {
+		if dd, ok := d.keyFn.(*defaultDedup); ok {
+			if dd.ignoreFields == nil {
+				dd.ignoreFields = make(map[string]struct{}, len(fields))
+			}
+			for _, f := range fields {
+				dd.ignoreFields[f] = struct{}{}
+			}
+		}
+	}
+}
+
 // NewDedup creates a deduplicating handler wrapper.
-func NewDedup[H lx.Handler](next H, ttl time.Duration, opts ...DedupOpt[H]) *Dedup[H] {
+func NewDedup(next lx.Handler, ttl time.Duration, opts ...DedupOpt) *Dedup {
 	if ttl <= 0 {
 		ttl = 2 * time.Second
 	}
 
-	d := &Dedup[H]{
+	d := &Dedup{
 		next:         next,
 		ttl:          ttl,
 		cleanupEvery: time.Minute,
-		keyFn:        defaultDedupKey,
+		keyFn:        NewDefaultDedup(), // Default deduper
 		done:         make(chan struct{}),
 	}
 
@@ -87,9 +123,9 @@ func NewDedup[H lx.Handler](next H, ttl time.Duration, opts ...DedupOpt[H]) *Ded
 }
 
 // Handle processes a log entry, suppressing duplicates within the TTL window.
-func (d *Dedup[H]) Handle(e *lx.Entry) error {
+func (d *Dedup) Handle(e *lx.Entry) error {
 	now := time.Now().UnixNano()
-	key := d.keyFn(e)
+	key := d.keyFn.Calculate(e)
 
 	// Select shard based on key hash
 	shardIdx := key % uint64(len(d.shards))
@@ -117,13 +153,13 @@ func (d *Dedup[H]) Handle(e *lx.Entry) error {
 }
 
 // Close stops the cleanup goroutine and closes the underlying handler.
-func (d *Dedup[H]) Close() error {
+func (d *Dedup) Close() error {
 	var err error
 	d.once.Do(func() {
 		close(d.done)
 		d.wg.Wait()
 
-		if c, ok := any(d.next).(interface{ Close() error }); ok {
+		if c, ok := d.next.(interface{ Close() error }); ok {
 			err = c.Close()
 		}
 	})
@@ -131,7 +167,7 @@ func (d *Dedup[H]) Close() error {
 }
 
 // cleanupLoop runs periodically to purge expired deduplication keys.
-func (d *Dedup[H]) cleanupLoop() {
+func (d *Dedup) cleanupLoop() {
 	defer d.wg.Done()
 
 	t := time.NewTicker(d.cleanupEvery)
@@ -154,10 +190,61 @@ func (d *Dedup[H]) cleanupLoop() {
 }
 
 // cleanupShard removes expired keys from a specific shard.
-func (d *Dedup[H]) cleanupShard(shard *dedupShard, now int64) {
+func (d *Dedup) cleanupShard(shard *dedupShard, now int64) {
 	for k, exp := range shard.seen {
 		if now > exp {
 			delete(shard.seen, k)
 		}
 	}
+}
+
+type defaultDedup struct {
+	ignoreFields map[string]struct{}
+}
+
+func NewDefaultDedup() Deduper {
+	return &defaultDedup{ignoreFields: make(map[string]struct{})}
+}
+
+// Calculate generates a deduplication key from level, message, namespace, and fields.
+// Excludes any fields in ignoreFields. Uses xxhash for fast hashing.
+func (d *defaultDedup) Calculate(e *lx.Entry) uint64 {
+	h := xxhash.New()
+
+	// Core fields
+	_, _ = h.Write([]byte(e.Level.String()))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(e.Message))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(e.Namespace))
+	_, _ = h.Write([]byte{0})
+
+	if len(e.Fields) > 0 {
+		m := e.Fields.Map()
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			if _, excluded := d.ignoreFields[k]; !excluded {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+
+		buf := dedupBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer dedupBufPool.Put(buf)
+
+		for _, k := range keys {
+			fmt.Fprint(buf, k)
+			buf.WriteByte('=')
+			fmt.Fprint(buf, m[k])
+			buf.WriteByte(0)
+		}
+		_, _ = h.Write(buf.Bytes())
+	}
+
+	return h.Sum64()
+}
+
+var dedupBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
 }
