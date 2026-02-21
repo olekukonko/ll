@@ -15,39 +15,33 @@ import (
 // It wraps another handler and filters out repeated log entries that match
 // within the deduplication period.
 type Dedup struct {
-	next lx.Handler
-
+	next           lx.Handler
 	ttl            time.Duration
 	cleanupEvery   time.Duration
 	keyFn          lx.Deduper
 	maxKeys        int
-	excludedFields map[string]struct{} // Fields to exclude from default key hash (only for default deduper)
-
-	// shards reduce lock contention by partitioning the key space
-	shards [32]dedupShard
-
-	done chan struct{}
-	wg   sync.WaitGroup
-	once sync.Once
+	excludedFields map[string]struct{} // Fields to exclude from default key hash
+	shards         [32]dedupShard      // Shards reduce lock contention
+	done           chan struct{}
+	wg             sync.WaitGroup
+	once           sync.Once
 }
 
 type dedupShard struct {
 	mu   sync.Mutex
-	seen map[uint64]int64
+	seen map[uint64]int64 // key -> expiry timestamp
 }
 
 // DedupOpt configures a Dedup handler.
 type DedupOpt func(*Dedup)
 
 // WithDedupKeyFunc customizes how deduplication keys are generated.
-// The provided function will be wrapped to implement Deduper.
 func WithDedupKeyFunc(fn func(*lx.Entry) uint64) DedupOpt {
 	return func(d *Dedup) {
 		d.keyFn = dedupKeyFunc(fn)
 	}
 }
 
-// dedupKeyFunc is a type that wraps a plain function to implement Deduper.
 type dedupKeyFunc func(*lx.Entry) uint64
 
 func (f dedupKeyFunc) Calculate(e *lx.Entry) uint64 {
@@ -73,8 +67,6 @@ func WithDedupMaxKeys(max int) DedupOpt {
 }
 
 // WithDedupIgnore specifies fields to ignore in the default key function.
-// Useful for excluding volatile fields like "duration" or "timestamp".
-// Only applies if using the default deduper (not a custom keyFn via WithDedupKeyFunc).
 func WithDedupIgnore(fields ...string) DedupOpt {
 	return func(d *Dedup) {
 		if dd, ok := d.keyFn.(*defaultDedup); ok {
@@ -93,27 +85,22 @@ func NewDedup(next lx.Handler, ttl time.Duration, opts ...DedupOpt) *Dedup {
 	if ttl <= 0 {
 		ttl = 2 * time.Second
 	}
-
 	d := &Dedup{
 		next:         next,
 		ttl:          ttl,
 		cleanupEvery: time.Minute,
-		keyFn:        NewDefaultDedup(), // Default deduper
+		keyFn:        NewDefaultDedup(),
 		done:         make(chan struct{}),
 	}
-
-	// Initialize shards
+	// Initialize shards with pre-allocated maps
 	for i := 0; i < len(d.shards); i++ {
 		d.shards[i].seen = make(map[uint64]int64, 64)
 	}
-
 	for _, opt := range opts {
 		opt(d)
 	}
-
 	d.wg.Add(1)
 	go d.cleanupLoop()
-
 	return d
 }
 
@@ -121,8 +108,6 @@ func NewDedup(next lx.Handler, ttl time.Duration, opts ...DedupOpt) *Dedup {
 func (d *Dedup) Handle(e *lx.Entry) error {
 	now := time.Now().UnixNano()
 	key := d.keyFn.Calculate(e)
-
-	// Select shard based on key hash
 	shardIdx := key % uint64(len(d.shards))
 	shard := &d.shards[shardIdx]
 
@@ -133,12 +118,10 @@ func (d *Dedup) Handle(e *lx.Entry) error {
 		return nil
 	}
 
-	// Basic guard against unbounded growth per shard
-	// Using strict limits per shard avoids global atomic counters
+	// Opportunistic cleanup if shard is getting full
 	limitPerShard := d.maxKeys / len(d.shards)
 	if d.maxKeys > 0 && len(shard.seen) >= limitPerShard {
-		// Opportunistic cleanup of current shard
-		d.cleanupShard(shard, now)
+		d.cleanupShardLocked(shard, now)
 	}
 
 	shard.seen[key] = now + d.ttl.Nanoseconds()
@@ -153,7 +136,6 @@ func (d *Dedup) Close() error {
 	d.once.Do(func() {
 		close(d.done)
 		d.wg.Wait()
-
 		if c, ok := d.next.(interface{ Close() error }); ok {
 			err = c.Close()
 		}
@@ -164,19 +146,18 @@ func (d *Dedup) Close() error {
 // cleanupLoop runs periodically to purge expired deduplication keys.
 func (d *Dedup) cleanupLoop() {
 	defer d.wg.Done()
-
-	t := time.NewTicker(d.cleanupEvery)
-	defer t.Stop()
-
+	ticker := time.NewTicker(d.cleanupEvery)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-t.C:
+		case <-ticker.C:
 			now := time.Now().UnixNano()
-			// Cleanup all shards sequentially to avoid massive CPU spike
+			// Cleanup all shards sequentially to avoid CPU spike
 			for i := 0; i < len(d.shards); i++ {
-				d.shards[i].mu.Lock()
-				d.cleanupShard(&d.shards[i], now)
-				d.shards[i].mu.Unlock()
+				shard := &d.shards[i]
+				shard.mu.Lock()
+				d.cleanupShardLocked(shard, now)
+				shard.mu.Unlock()
 			}
 		case <-d.done:
 			return
@@ -184,8 +165,8 @@ func (d *Dedup) cleanupLoop() {
 	}
 }
 
-// cleanupShard removes expired keys from a specific shard.
-func (d *Dedup) cleanupShard(shard *dedupShard, now int64) {
+// cleanupShardLocked removes expired keys from a shard (caller must hold lock).
+func (d *Dedup) cleanupShardLocked(shard *dedupShard, now int64) {
 	for k, exp := range shard.seen {
 		if now > exp {
 			delete(shard.seen, k)
@@ -193,6 +174,7 @@ func (d *Dedup) cleanupShard(shard *dedupShard, now int64) {
 	}
 }
 
+// defaultDedup implements the default deduplication key calculation.
 type defaultDedup struct {
 	ignoreFields map[string]struct{}
 }
@@ -205,15 +187,17 @@ func NewDefaultDedup() lx.Deduper {
 // Excludes any fields in ignoreFields. Uses xxhash for fast hashing.
 func (d *defaultDedup) Calculate(e *lx.Entry) uint64 {
 	h := xxhash.New()
+	zero := []byte{0}
 
-	// Core fields
-	_, _ = h.Write([]byte(e.Level.String()))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(e.Message))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(e.Namespace))
-	_, _ = h.Write([]byte{0})
+	// Core fields - use Write([]byte) for all data
+	h.WriteString(e.Level.String())
+	h.Write(zero)
+	h.WriteString(e.Message)
+	h.Write(zero)
+	h.WriteString(e.Namespace)
+	h.Write(zero)
 
+	// Add fields if present
 	if len(e.Fields) > 0 {
 		m := e.Fields.Map()
 		keys := make([]string, 0, len(m))
@@ -224,17 +208,18 @@ func (d *defaultDedup) Calculate(e *lx.Entry) uint64 {
 		}
 		sort.Strings(keys)
 
+		// Use pooled buffer to avoid allocations
 		buf := dedupBufPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer dedupBufPool.Put(buf)
 
 		for _, k := range keys {
-			fmt.Fprint(buf, k)
+			buf.WriteString(k)
 			buf.WriteByte('=')
 			fmt.Fprint(buf, m[k])
 			buf.WriteByte(0)
 		}
-		_, _ = h.Write(buf.Bytes())
+		h.Write(buf.Bytes())
 	}
 
 	return h.Sum64()
