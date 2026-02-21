@@ -1,5 +1,7 @@
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
+github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/olekukonko/cat v0.0.0-20250808185521-0d9f5959211f h1:ttD8kf/e7ZWCoQohfY/5qhUuoUfjmCgaGL/5zRNwM4c=
 github.com/olekukonko/cat v0.0.0-20250808185521-0d9f5959211f/go.mod h1:rEKTHC9roVVicUIfZK7DYrdIoM0EOr8mK1Hj5s3JjH0=
 github.com/olekukonko/cat v0.0.0-20250808191157-46fba99501f3 h1:3o1yj5hu9LOTwjey1RE0IBaB4u1HCLbD+lDPhJrl8Y4=
