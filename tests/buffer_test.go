@@ -202,7 +202,7 @@ func TestBufferedHandler(t *testing.T) {
 		}
 
 		handler.Flush()
-		// No assertion here; this test is to ensure it doesn't race/panic.
+		// Inactive assertion here; this test is to ensure it doesn't race/panic.
 		_ = waitUntil(300*time.Millisecond, func() bool { return true })
 	})
 

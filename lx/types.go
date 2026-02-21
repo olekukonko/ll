@@ -118,6 +118,10 @@ func (t ClassType) String() string {
 		return RawString
 	case ClassTimed:
 		return TimedString
+	case ClassStack:
+		return StackString
+	case ClassOutput:
+		return OutputString
 	default:
 		return UnknownString
 	}
