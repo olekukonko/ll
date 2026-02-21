@@ -593,10 +593,10 @@ func (l *Logger) FieldOne(key string, value any) *FieldBuilder {
 //
 //	logger := New("app").Enable()
 //	logger.Field(map[string]interface{}{"user": "alice"}).Info("Action") // Output: [app] INFO: Action [user=alice]
+//
+// Field starts a fluent chain for adding fields from a map
 func (l *Logger) Field(fields map[string]interface{}) *FieldBuilder {
-	fb := fieldBuilderPool.Get().(*FieldBuilder)
-	fb.logger = l
-	fb.fields = fb.fields[:0]
+	fb := getFieldBuilder(l, len(fields))
 	if l.suspend.Load() {
 		return fb
 	}
@@ -613,9 +613,7 @@ func (l *Logger) Field(fields map[string]interface{}) *FieldBuilder {
 //
 //	logger.Fields("user", "alice").Info("Action") // Output: [app] INFO: Action [user=alice]
 func (l *Logger) Fields(pairs ...any) *FieldBuilder {
-	fb := fieldBuilderPool.Get().(*FieldBuilder)
-	fb.logger = l
-	fb.fields = fb.fields[:0]
+	fb := getFieldBuilder(l, len(pairs)/2)
 	if l.suspend.Load() {
 		return fb
 	}
