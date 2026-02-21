@@ -20,17 +20,27 @@ import (
 )
 
 // stackBufPool pools buffers for stack trace capture to reduce allocations.
-var stackBufPool = sync.Pool{
-	New: func() any { return make([]byte, 4096) },
-}
-var entryPool = sync.Pool{
-	New: func() any {
-		return &lx.Entry{
-			Fields: make(lx.Fields, 0, 4),
-			Stack:  nil,
-		}
-	},
-}
+var (
+	stackBufPool = sync.Pool{
+		New: func() any { return make([]byte, 4096) },
+	}
+
+	entryPool = sync.Pool{
+		New: func() any {
+			return &lx.Entry{
+				Fields: make(lx.Fields, 0, 4),
+				Stack:  nil,
+			}
+		},
+	}
+
+	fieldsSlicePool = sync.Pool{
+		New: func() any {
+			s := make(lx.Fields, 0, 8)
+			return &s
+		},
+	}
+)
 
 // Logger manages logging configuration and behavior, encapsulating state such as enablement,
 // log level, namespaces, context fields, output style, handler, middleware, and formatting.
@@ -1356,13 +1366,16 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 
 	// Optimized field merging - avoid allocation when possible
 	var combinedFields lx.Fields
+	var pooledFields *lx.Fields // Track if we allocated from pool
+
 	if len(context) == 0 {
 		combinedFields = fields
 	} else if len(fields) == 0 {
 		combinedFields = context
 	} else {
-		// Pre-allocate exact capacity
-		combinedFields = make(lx.Fields, 0, len(context)+len(fields))
+		// Get pooled slice
+		pooledFields = fieldsSlicePool.Get().(*lx.Fields)
+		combinedFields = (*pooledFields)[:0] // Reset length, keep capacity
 		combinedFields = append(combinedFields, context...)
 		combinedFields = append(combinedFields, fields...)
 	}
