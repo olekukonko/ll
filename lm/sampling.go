@@ -2,9 +2,10 @@ package lm
 
 import (
 	"fmt"
-	"github.com/olekukonko/ll/lx"
 	"math/rand"
 	"sync"
+
+	"github.com/olekukonko/ll/lx"
 )
 
 // Sampling is a middleware that randomly samples log entries based on a rate per level.
@@ -60,8 +61,8 @@ func (s *Sampling) Set(level lx.LevelType, rate float64) *Sampling {
 func (s *Sampling) Handle(e *lx.Entry) error {
 	rate, exists := s.rates[e.Level] // Check if level has a sampling rate
 	if !exists {
-		// fmt.Printf("Sampling: No rate for level %v\n", e.Level)
-		return nil // No sampling for this level, allow log
+		// fmt.Printf("Sampling: Inactive rate for level %v\n", e.Level)
+		return nil // Inactive sampling for this level, allow log
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
