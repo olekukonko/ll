@@ -20,9 +20,16 @@ func rightPad(str string, length int) string {
 	return sb.String()
 }
 
+// stringWriter is the interface for types that can write strings and bytes.
+// Both *strings.Builder and *bytes.Buffer implement this.
+type stringWriter interface {
+	WriteString(s string) (int, error)
+	Write(p []byte) (n int, err error)
+}
+
 // writeFieldValue writes a field value to the builder using type switches
 // to avoid reflection and allocations associated with fmt.Fprint.
-func writeFieldValue(b *strings.Builder, v interface{}) {
+func writeFieldValue(b stringWriter, v interface{}) {
 	switch val := v.(type) {
 	case string:
 		b.WriteString(val)
@@ -63,7 +70,6 @@ func writeFieldValue(b *strings.Builder, v interface{}) {
 	case fmt.Stringer:
 		b.WriteString(val.String())
 	default:
-		// Fallback to fmt.Fprint only for unknown types
 		fmt.Fprint(b, val)
 	}
 }
