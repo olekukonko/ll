@@ -372,7 +372,7 @@ func (h *ColorizedHandler) Handle(e *lx.Entry) error {
 	switch e.Class {
 	case lx.ClassDump:
 		return h.handleDumpOutput(e)
-	case lx.ClassJSON:
+	case lx.ClassJSON, lx.ClassOutput:
 		return h.handleJSONOutput(e)
 	case lx.ClassInspect:
 		return h.handleInspectOutput(e)
@@ -713,7 +713,6 @@ func (h *ColorizedHandler) formatLevel(b *bytes.Buffer, e *lx.Entry) {
 	}[e.Level]
 
 	b.WriteString(color)
-	//b.WriteString(rightPad(e.Level.Name(e.Class), 8))
 	b.WriteString(e.Level.Name(e.Class))
 	b.WriteString(h.palette.Reset)
 	// b.WriteString(lx.Space)
