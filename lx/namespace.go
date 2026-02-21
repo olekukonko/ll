@@ -24,7 +24,17 @@ type Namespace struct {
 // It clears the cache to ensure subsequent lookups reflect the change.
 func (ns *Namespace) Set(path string, enabled bool) {
 	ns.store.Store(path, enabled)
-	ns.clearCache()
+	ns.invalidatePathCache(path)
+}
+
+func (ns *Namespace) invalidatePathCache(path string) {
+	ns.cache.Range(func(key, value interface{}) bool {
+		cachePath := key.(string)
+		if strings.HasPrefix(cachePath, path+"/") || cachePath == path {
+			ns.cache.Delete(key)
+		}
+		return true
+	})
 }
 
 // Load retrieves an explicit rule from the store for a path.
