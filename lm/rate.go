@@ -2,96 +2,128 @@ package lm
 
 import (
 	"fmt"
-	"github.com/olekukonko/ll/lx"
+	"hash/fnv"
 	"sync"
 	"time"
+
+	"github.com/olekukonko/ll/lx"
 )
 
-// RateLimiter is a middleware that limits the rate of log entries per level.
-// It tracks log counts for each log level within a specified time interval,
-// rejecting entries that exceed the allowed rate.
-// Thread-safe with mutexes for concurrent access.
+// shardCount determines the number of shards for the rate limiter.
+// Should be a power of 2 for efficient modulo operations.
+const shardCount = 32
+
+// RateLimiter is a sharded middleware that limits the rate of log entries per level.
 type RateLimiter struct {
-	limits map[lx.LevelType]*rateLimit // Map of log levels to their rate limits
-	mu     sync.Mutex                  // Protects concurrent access to limits map
+	shards [shardCount]*rateLimitShard
+}
+
+// rateLimitShard holds rate limiting state for a subset of log levels.
+type rateLimitShard struct {
+	limits sync.Map // map[lx.LevelType]*rateLimit
 }
 
 // rateLimit holds rate limiting state for a specific log level.
-// It tracks the current log count, maximum allowed logs, time interval,
-// and the timestamp of the last log.
 type rateLimit struct {
-	count    int           // Current number of logs in the interval
-	maxCount int           // Maximum allowed logs per interval
-	interval time.Duration // Time window for rate limiting
-	last     time.Time     // Time of the last log
-	mu       sync.Mutex    // Protects concurrent access
+	count    int32      // Current count
+	maxCount int32      // Maximum allowed
+	interval int64      // Interval in nanoseconds
+	last     int64      // Last update timestamp in nanoseconds
+	mu       sync.Mutex // Protects count/last during reset
 }
 
-// NewRateLimiter creates a new RateLimiter for a specific log level.
-// It initializes the limiter with the given level, maximum log count, and time interval.
-// The limiter can be extended to other levels using the Set method.
-// Example:
-//
-//	limiter := NewRateLimiter(lx.LevelInfo, 10, time.Second)
-//	logger := ll.New("app").Enable().Use(limiter)
-//	logger.Info("Test") // Allowed up to 10 times per second
+// NewRateLimiter creates a new sharded RateLimiter for a specific log level.
 func NewRateLimiter(level lx.LevelType, count int, interval time.Duration) *RateLimiter {
-	r := &RateLimiter{
-		limits: make(map[lx.LevelType]*rateLimit), // Initialize empty limits map
+	r := &RateLimiter{}
+	for i := range r.shards {
+		r.shards[i] = &rateLimitShard{}
 	}
-	// Set initial rate limit for the specified level
 	r.Set(level, count, interval)
 	return r
 }
 
 // Set configures a rate limit for a specific log level.
-// It adds or updates the rate limit for the given level with the specified count and interval.
-// Thread-safe with a mutex. Returns the RateLimiter for chaining.
-// Example:
-//
-//	limiter := NewRateLimiter(lx.LevelInfo, 10, time.Second)
-//	limiter.Set(lx.LevelWarn, 5, time.Minute) // Add limit for Warn level
 func (rl *RateLimiter) Set(level lx.LevelType, count int, interval time.Duration) *RateLimiter {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	// Create or update rate limit for the level
-	rl.limits[level] = &rateLimit{
-		count:    0,          // Initialize count to zero
-		maxCount: count,      // Set maximum allowed logs
-		interval: interval,   // Set time window
-		last:     time.Now(), // Set initial timestamp
+	shard := rl.getShard(level)
+
+	limit := &rateLimit{
+		count:    0,
+		maxCount: int32(count),
+		interval: interval.Nanoseconds(),
+		last:     time.Now().UnixNano(),
 	}
+
+	shard.limits.Store(level, limit)
 	return rl
 }
 
+// getShard returns the appropriate shard for a log level using FNV hash.
+func (rl *RateLimiter) getShard(level lx.LevelType) *rateLimitShard {
+	h := fnv.New32a()
+	h.Write([]byte{byte(level)})
+	idx := h.Sum32() & (shardCount - 1)
+	return rl.shards[idx]
+}
+
 // Handle processes a log entry and enforces rate limiting.
-// It checks if the entry's level has a rate limit and verifies if the log count
-// within the current interval exceeds the maximum allowed.
-// Returns an error if the rate limit is exceeded, causing the log to be dropped.
-// Thread-safe with mutexes for concurrent access.
-// Example (internal usage):
-//
-//	err := limiter.Handle(&lx.Entry{Level: lx.LevelInfo}) // Returns error if limit exceeded
 func (rl *RateLimiter) Handle(e *lx.Entry) error {
-	rl.mu.Lock()
-	limit, exists := rl.limits[e.Level] // Check if level has a rate limit
-	rl.mu.Unlock()
+	shard := rl.getShard(e.Level)
+
+	// Fast path: check if limit exists without locking
+	val, exists := shard.limits.Load(e.Level)
 	if !exists {
-		return nil // No limit for this level, allow log
+		return nil
 	}
 
+	limit := val.(*rateLimit)
+	now := time.Now().UnixNano()
+
+	// Check if interval passed
+	if now-limit.last >= limit.interval {
+		limit.mu.Lock()
+		// Double-check after acquiring lock
+		current := time.Now().UnixNano()
+		if current-limit.last >= limit.interval {
+			limit.last = current
+			limit.count = 1
+			limit.mu.Unlock()
+			return nil
+		}
+		limit.mu.Unlock()
+	}
+
+	// Increment count and check limit
 	limit.mu.Lock()
 	defer limit.mu.Unlock()
-	now := time.Now()
-	// Reset count if interval has passed
-	if now.Sub(limit.last) >= limit.interval {
-		limit.last = now
-		limit.count = 0
+
+	// Re-check interval in case another goroutine reset it
+	current := time.Now().UnixNano()
+	if current-limit.last >= limit.interval {
+		limit.last = current
+		limit.count = 1
+		return nil
 	}
-	limit.count++ // Increment log count
-	// Check if limit is exceeded
+
+	limit.count++
 	if limit.count > limit.maxCount {
-		return fmt.Errorf("rate limit exceeded") // Drop log
+		return fmt.Errorf("rate limit exceeded for level %v", e.Level)
 	}
-	return nil // Allow log
+	return nil
+}
+
+// Delete removes a rate limit for a specific level.
+func (rl *RateLimiter) Delete(level lx.LevelType) {
+	shard := rl.getShard(level)
+	shard.limits.Delete(level)
+}
+
+// Get retrieves the current rate limit settings for a level.
+func (rl *RateLimiter) Get(level lx.LevelType) (int, time.Duration, bool) {
+	shard := rl.getShard(level)
+	val, exists := shard.limits.Load(level)
+	if !exists {
+		return 0, 0, false
+	}
+	limit := val.(*rateLimit)
+	return int(limit.maxCount), time.Duration(limit.interval), true
 }
