@@ -423,9 +423,9 @@ func TestPrefix(t *testing.T) {
 	t.Run("RemovePrefix", func(t *testing.T) {
 		buf.Reset()
 		logger = logger.Prefix("")
-		logger.Infof("No prefix")
+		logger.Infof("Inactive prefix")
 		output := buf.String()
-		if !strings.Contains(output, "INFO: No prefix") {
+		if !strings.Contains(output, "INFO: Inactive prefix") {
 			t.Errorf("Expected message without prefix, got: %q", output)
 		}
 	})
@@ -463,9 +463,9 @@ func TestIndent(t *testing.T) {
 	t.Run("RemoveIndent", func(t *testing.T) {
 		logger = logger.Indent(0)
 		buf.Reset()
-		logger.Infof("No indent")
-		if !strings.Contains(buf.String(), "[app] INFO: No indent") {
-			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: No indent")
+		logger.Infof("Inactive indent")
+		if !strings.Contains(buf.String(), "[app] INFO: Inactive indent") {
+			t.Errorf("Expected %q to contain %q", buf.String(), "[app] INFO: Inactive indent")
 		}
 	})
 }
