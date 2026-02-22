@@ -65,6 +65,7 @@ func TestBufferedHandler(t *testing.T) {
 		handler := lh.NewBuffered(textHandler,
 			lh.WithBatchSize(2),
 			lh.WithFlushInterval(100*time.Millisecond),
+			lh.WithErrorOutput(io.Discard),
 		)
 
 		_ = handler.Handle(&lx.Entry{Message: "test1"})
@@ -90,6 +91,7 @@ func TestBufferedHandler(t *testing.T) {
 		handler := lh.NewBuffered(textHandler,
 			lh.WithBatchSize(100),
 			lh.WithFlushInterval(50*time.Millisecond),
+			lh.WithErrorOutput(io.Discard),
 		)
 
 		_ = handler.Handle(&lx.Entry{Message: "test"})
@@ -114,6 +116,7 @@ func TestBufferedHandler(t *testing.T) {
 			lh.WithBatchSize(2),
 			lh.WithMaxBuffer(2),
 			lh.WithOverflowHandler(func(int) { overflowCalled.Store(true) }),
+			lh.WithErrorOutput(io.Discard),
 		)
 		defer handler.Close()
 
@@ -132,7 +135,7 @@ func TestBufferedHandler(t *testing.T) {
 	t.Run("ExplicitFlush", func(t *testing.T) {
 		buf := &safeBuffer{}
 		textHandler := lh.NewTextHandler(buf)
-		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(100))
+		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(100), lh.WithErrorOutput(io.Discard))
 		defer handler.Close()
 
 		_ = handler.Handle(&lx.Entry{Message: "test"})
@@ -150,7 +153,7 @@ func TestBufferedHandler(t *testing.T) {
 	t.Run("ShutdownDrainsBuffer", func(t *testing.T) {
 		buf := &safeBuffer{}
 		textHandler := lh.NewTextHandler(buf)
-		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(100))
+		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(100), lh.WithErrorOutput(io.Discard))
 
 		_ = handler.Handle(&lx.Entry{Message: "test"})
 		_ = handler.Close()
@@ -167,6 +170,7 @@ func TestBufferedHandler(t *testing.T) {
 			lh.WithBatchSize(100),
 			lh.WithFlushInterval(10*time.Millisecond),
 			lh.WithMaxBuffer(2000),
+			lh.WithErrorOutput(io.Discard),
 		)
 
 		var wg sync.WaitGroup
@@ -193,7 +197,7 @@ func TestBufferedHandler(t *testing.T) {
 	t.Run("ErrorHandling", func(t *testing.T) {
 		errWriter := &errorWriter{err: errors.New("write error")}
 		textHandler := lh.NewTextHandler(errWriter)
-		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(1))
+		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(1), lh.WithErrorOutput(io.Discard))
 		defer handler.Close()
 
 		// Buffered handler should accept the entry; write error occurs during flush.
@@ -209,7 +213,7 @@ func TestBufferedHandler(t *testing.T) {
 	t.Run("Finalizer", func(t *testing.T) {
 		buf := &safeBuffer{}
 		textHandler := lh.NewTextHandler(buf)
-		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(100))
+		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(100), lh.WithErrorOutput(io.Discard))
 
 		_ = handler.Handle(&lx.Entry{Message: "test"})
 
@@ -226,7 +230,7 @@ func TestBufferedHandler(t *testing.T) {
 func TestBufferedHandlerOptions(t *testing.T) {
 	t.Run("DefaultValues", func(t *testing.T) {
 		textHandler := lh.NewTextHandler(&safeBuffer{})
-		handler := lh.NewBuffered(textHandler)
+		handler := lh.NewBuffered(textHandler, lh.WithErrorOutput(io.Discard))
 		defer handler.Close()
 
 		if handler.Config().BatchSize != 100 {
@@ -249,6 +253,7 @@ func TestBufferedHandlerOptions(t *testing.T) {
 			lh.WithFlushInterval(5*time.Second),
 			lh.WithMaxBuffer(500),
 			lh.WithOverflowHandler(func(int) { called.Store(true) }),
+			lh.WithErrorOutput(io.Discard),
 		)
 		defer handler.Close()
 
@@ -272,7 +277,7 @@ func TestBufferedHandlerOptions(t *testing.T) {
 func TestBufferedHandlerEdgeCases(t *testing.T) {
 	t.Run("ZeroBatchSize", func(t *testing.T) {
 		textHandler := lh.NewTextHandler(&safeBuffer{})
-		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(0))
+		handler := lh.NewBuffered(textHandler, lh.WithBatchSize(0), lh.WithErrorOutput(io.Discard))
 		defer handler.Close()
 
 		if handler.Config().BatchSize != 1 {
@@ -295,6 +300,7 @@ func TestBufferedHandlerEdgeCases(t *testing.T) {
 		handler := lh.NewBuffered(textHandler,
 			lh.WithBatchSize(10),
 			lh.WithMaxBuffer(5),
+			lh.WithErrorOutput(io.Discard),
 		)
 		defer handler.Close()
 
@@ -312,6 +318,7 @@ func TestBufferedHandlerIntegration(t *testing.T) {
 		handler := lh.NewBuffered(textHandler,
 			lh.WithBatchSize(2),
 			lh.WithFlushInterval(50*time.Millisecond),
+			lh.WithErrorOutput(io.Discard),
 		)
 
 		_ = handler.Handle(&lx.Entry{Message: "message1"})
@@ -363,7 +370,7 @@ func TestBufferedHandlerIntegration(t *testing.T) {
 			lh.NewTextHandler(buf1),
 			lh.NewJSONHandler(buf2),
 		)
-		handler := lh.NewBuffered(multiHandler, lh.WithBatchSize(3))
+		handler := lh.NewBuffered(multiHandler, lh.WithBatchSize(3), lh.WithErrorOutput(io.Discard))
 
 		_ = handler.Handle(&lx.Entry{Message: "test"})
 		_ = handler.Handle(&lx.Entry{Message: "test"})
