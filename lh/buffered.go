@@ -15,9 +15,11 @@ import (
 type Buffering struct {
 	BatchSize     int           // Flush when this many entries are buffered (default: 100)
 	FlushInterval time.Duration // Maximum time between flushes (default: 10s)
+	FlushTimeout  time.Duration // FlushTimeout specifies the duration to wait for a flush attempt to complete before timing out.
 	MaxBuffer     int           // Maximum buffer size before applying backpressure (default: 1000)
 	OnOverflow    func(int)     // Called when buffer reaches MaxBuffer (default: logs warning)
 	ErrorOutput   io.Writer     // Destination for internal errors like flush failures (default: os.Stderr)
+
 }
 
 // BufferingOpt configures Buffered handler.
@@ -42,6 +44,17 @@ func WithBatchSize(size int) BufferingOpt {
 func WithFlushInterval(d time.Duration) BufferingOpt {
 	return func(c *Buffering) {
 		c.FlushInterval = d
+	}
+}
+
+// WithFlushTimeout sets the maximum time between flushes.
+// It defines the interval at which buffered entries are flushed, even if the batch size is not reached.
+// Example:
+//
+//	handler := NewBuffered(textHandler, WithFlushTimeout(100*time.Millisecond)) // Flush every 5 seconds
+func WithFlushTimeout(d time.Duration) BufferingOpt {
+	return func(c *Buffering) {
+		c.FlushTimeout = d
 	}
 }
 
@@ -101,52 +114,78 @@ type Buffered[H lx.Handler] struct {
 //	textHandler := lh.NewTextHandler(os.Stdout)
 //	buffered := NewBuffered(textHandler, WithBatchSize(50))
 func NewBuffered[H lx.Handler](handler H, opts ...BufferingOpt) *Buffered[H] {
-	// Initialize default configuration
 	config := &Buffering{
-		BatchSize:     100,              // Default: flush every 100 entries
-		FlushInterval: 10 * time.Second, // Default: flush every 10 seconds
-		MaxBuffer:     1000,             // Default: max 1000 entries in buffer
-		ErrorOutput:   os.Stderr,        // Default: report errors to stderr
-		OnOverflow: func(count int) { // Default: log overflow to io.Discard (silent by default for overflow)
+		BatchSize:     100,
+		FlushInterval: 10 * time.Second,
+		MaxBuffer:     1000,
+		ErrorOutput:   os.Stderr,
+		OnOverflow: func(count int) {
 			fmt.Fprintf(io.Discard, "log buffer overflow: %d entries\n", count)
 		},
 	}
 
-	// Apply provided options
 	for _, opt := range opts {
 		opt(config)
 	}
 
-	// Ensure sane configuration values
 	if config.BatchSize < 1 {
-		config.BatchSize = 1 // Minimum batch size is 1
+		config.BatchSize = 1
 	}
 	if config.MaxBuffer < config.BatchSize {
-		config.MaxBuffer = config.BatchSize * 10 // Ensure buffer is at least 10x batch size
+		config.MaxBuffer = config.BatchSize * 10
 	}
 	if config.FlushInterval <= 0 {
-		config.FlushInterval = 10 * time.Second // Minimum flush interval is 10s
+		config.FlushInterval = 10 * time.Second
 	}
+
+	if config.FlushTimeout <= 0 {
+		config.FlushTimeout = 100 * time.Millisecond
+	}
+
 	if config.ErrorOutput == nil {
 		config.ErrorOutput = os.Stderr
 	}
 
-	// Initialize Buffered handler
 	b := &Buffered[H]{
-		handler:     handler,                                // Set underlying handler
-		config:      config,                                 // Set configuration
-		entries:     make(chan *lx.Entry, config.MaxBuffer), // Create buffered channel
-		flushSignal: make(chan struct{}, 1),                 // Create single-slot flush signal channel
-		shutdown:    make(chan struct{}),                    // Create shutdown signal channel
+		handler:     handler,
+		config:      config,
+		entries:     make(chan *lx.Entry, config.MaxBuffer),
+		flushSignal: make(chan struct{}, 1),
+		shutdown:    make(chan struct{}),
 	}
 
-	// Start worker goroutine
 	b.wg.Add(1)
 	go b.worker()
 
-	// Set finalizer for cleanup during garbage collection
 	runtime.SetFinalizer(b, (*Buffered[H]).Final)
 	return b
+}
+
+// cloneEntry creates a deep copy of an entry for safe asynchronous processing.
+// The original entry belongs to the logger's pool and is reused immediately after Handle() returns.
+func (b *Buffered[H]) cloneEntry(e *lx.Entry) *lx.Entry {
+	entryCopy := &lx.Entry{
+		Timestamp: e.Timestamp,
+		Level:     e.Level,
+		Message:   e.Message,
+		Namespace: e.Namespace,
+		Style:     e.Style,
+		Class:     e.Class,
+		Error:     e.Error,
+		Id:        e.Id,
+	}
+
+	if len(e.Fields) > 0 {
+		entryCopy.Fields = make(lx.Fields, len(e.Fields))
+		copy(entryCopy.Fields, e.Fields)
+	}
+
+	if len(e.Stack) > 0 {
+		entryCopy.Stack = make([]byte, len(e.Stack))
+		copy(entryCopy.Stack, e.Stack)
+	}
+
+	return entryCopy
 }
 
 // Handle implements the lx.Handler interface.
@@ -157,33 +196,31 @@ func NewBuffered[H lx.Handler](handler H, opts ...BufferingOpt) *Buffered[H] {
 //
 //	buffered.Handle(&lx.Entry{Message: "test"}) // Buffers entry or triggers flush
 func (b *Buffered[H]) Handle(e *lx.Entry) error {
+	entryCopy := b.cloneEntry(e)
+
 	select {
-	case b.entries <- e:
+	case b.entries <- entryCopy:
 		return nil
 	default:
-		// Notify overflow handler if configured
 		if b.config.OnOverflow != nil {
 			b.config.OnOverflow(len(b.entries))
 		}
 
-		// Try to trigger a flush to make space
 		select {
 		case b.flushSignal <- struct{}{}:
 			select {
-			case b.entries <- e:
+			case b.entries <- entryCopy:
 				return nil
 			default:
 				return fmt.Errorf("log buffer overflow, flush triggered but still full")
 			}
 		default:
-			// Flush already in progress
 			return fmt.Errorf("log buffer overflow and flush already in progress")
 		}
 	}
 }
 
 // Flush triggers an immediate flush of buffered entries.
-// It sends a signal to the worker to process all buffered entries.
 // If a flush is already pending, it waits briefly and may exit without flushing.
 // Thread-safe via non-blocking channel operations.
 // Example:
@@ -191,9 +228,8 @@ func (b *Buffered[H]) Handle(e *lx.Entry) error {
 //	buffered.Flush() // Flushes all buffered entries
 func (b *Buffered[H]) Flush() {
 	select {
-	case b.flushSignal <- struct{}{}: // Signal worker to flush
-	case <-time.After(100 * time.Millisecond): // Timeout if flush is pending
-		// Flush already pending
+	case b.flushSignal <- struct{}{}:
+	case <-time.After(b.config.FlushTimeout):
 	}
 }
 
@@ -208,11 +244,10 @@ func (b *Buffered[H]) Flush() {
 func (b *Buffered[H]) Close() error {
 	var closeErr error
 	b.shutdownOnce.Do(func() {
-		close(b.shutdown)            // Signal worker to shut down
-		b.wg.Wait()                  // Wait for worker to finish
-		runtime.SetFinalizer(b, nil) // Remove finalizer
+		close(b.shutdown)
+		b.wg.Wait()
+		runtime.SetFinalizer(b, nil)
 
-		// Check if underlying handler has a Close method and call it
 		if closer, ok := any(b.handler).(interface{ Close() error }); ok {
 			closeErr = closer.Close()
 		}
@@ -244,35 +279,35 @@ func (b *Buffered[H]) Config() *Buffering {
 // and shutting down cleanly when signaled.
 // Thread-safe via channel operations and WaitGroup.
 func (b *Buffered[H]) worker() {
-	defer b.wg.Done()                                 // Signal completion when worker exits
-	batch := make([]*lx.Entry, 0, b.config.BatchSize) // Buffer for batching entries
-	ticker := time.NewTicker(b.config.FlushInterval)  // Timer for periodic flushes
-	defer ticker.Stop()                               // Clean up ticker
+	defer b.wg.Done()
+	batch := make([]*lx.Entry, 0, b.config.BatchSize)
+	ticker := time.NewTicker(b.config.FlushInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
-		case entry := <-b.entries: // Receive new entry
+		case entry := <-b.entries:
 			batch = append(batch, entry)
-			// Flush if batch size is reached
 			if len(batch) >= b.config.BatchSize {
 				b.flushBatch(batch)
 				batch = batch[:0]
 			}
-		case <-ticker.C: // Periodic flush
+		case <-ticker.C:
 			if len(batch) > 0 {
 				b.flushBatch(batch)
 				batch = batch[:0]
 			}
-		case <-b.flushSignal: // Explicit flush
+		case <-b.flushSignal:
 			if len(batch) > 0 {
 				b.flushBatch(batch)
 				batch = batch[:0]
 			}
-			b.drainRemaining() // Drain all entries from the channel
-		case <-b.shutdown: // Shutdown signal
+			b.drainRemaining()
+		case <-b.shutdown:
 			if len(batch) > 0 {
 				b.flushBatch(batch)
 			}
-			b.drainRemaining() // Flush remaining entries
+			b.drainRemaining()
 			return
 		}
 	}
@@ -285,7 +320,6 @@ func (b *Buffered[H]) worker() {
 //	b.flushBatch([]*lx.Entry{entry1, entry2})
 func (b *Buffered[H]) flushBatch(batch []*lx.Entry) {
 	for _, entry := range batch {
-		// Process each entry through the handler
 		if err := b.handler.Handle(entry); err != nil {
 			if b.config.ErrorOutput != nil {
 				fmt.Fprintf(b.config.ErrorOutput, "log flush error: %v\n", err)
@@ -303,13 +337,13 @@ func (b *Buffered[H]) flushBatch(batch []*lx.Entry) {
 func (b *Buffered[H]) drainRemaining() {
 	for {
 		select {
-		case entry := <-b.entries: // Process next entry
+		case entry := <-b.entries:
 			if err := b.handler.Handle(entry); err != nil {
 				if b.config.ErrorOutput != nil {
 					fmt.Fprintf(b.config.ErrorOutput, "log drain error: %v\n", err)
 				}
 			}
-		default: // Exit when channel is empty
+		default:
 			return
 		}
 	}

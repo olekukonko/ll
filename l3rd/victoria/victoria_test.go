@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olekukonko/ll/lh"
 	"github.com/olekukonko/ll/lx"
 )
 
@@ -520,4 +521,88 @@ func TestConcurrentHandling(t *testing.T) {
 	if actualCount != totalExpected {
 		t.Errorf("expected %d logs, received %d", totalExpected, actualCount)
 	}
+}
+
+// TestRaceCondition reproduces the data race where the logger reuses
+// an entry while the buffered victoria handler is still processing it.
+func TestRaceCondition(t *testing.T) {
+	var requestCount int
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestCount++
+		mu.Unlock()
+		// Add delay to increase chance of race
+		time.Sleep(10 * time.Millisecond)
+		io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	v, err := New(
+		WithURL(server.URL),
+		WithTimeout(5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+	defer v.Close()
+
+	// Wrap in buffered handler to simulate the race condition
+	buffered := lh.NewBuffered(v,
+		lh.WithBatchSize(10),
+		lh.WithFlushInterval(100*time.Millisecond),
+		lh.WithMaxBuffer(100),
+	)
+	defer buffered.Close()
+
+	// Simulate what happens in ll: entries are pooled and reused
+	entryPool := &sync.Pool{
+		New: func() interface{} {
+			return &lx.Entry{
+				Fields: make([]lx.Field, 0, 8),
+			}
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				// Get entry from pool (simulating logger's behavior)
+				e := entryPool.Get().(*lx.Entry)
+				e.Timestamp = time.Now()
+				e.Level = lx.LevelInfo
+				e.Message = "test message"
+				e.Namespace = "test.race"
+				e.Fields = e.Fields[:0]
+				e.Fields = append(e.Fields, lx.Field{Key: "id", Value: id})
+				e.Fields = append(e.Fields, lx.Field{Key: "seq", Value: j})
+
+				// Send to buffered handler
+				buffered.Handle(e)
+
+				// Immediately reset and return to pool (this causes the race)
+				// The logger does this via defer in log()
+				e.Timestamp = time.Time{}
+				e.Level = 0
+				e.Message = ""
+				e.Namespace = ""
+				e.Fields = e.Fields[:0]
+				entryPool.Put(e)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	buffered.Flush()
+
+	mu.Lock()
+	count := requestCount
+	mu.Unlock()
+
+	t.Logf("Processed %d requests", count)
 }
