@@ -9,4 +9,4 @@ exclude_files {
 }
 use_gitignore = true
 detailed = true
-go_mode = "code"
+go_mode = "all"

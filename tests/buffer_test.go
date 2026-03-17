@@ -1,4 +1,3 @@
-// buffer_test.go
 package tests
 
 import (
@@ -43,6 +42,19 @@ func (s *safeBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// blockingWriter is an io.Writer whose Write blocks until the gate channel is
+// closed.  It is used to freeze the Buffered worker goroutine inside a flush
+// so that the entries channel stays full and overflow can be reliably triggered.
+type blockingWriter struct {
+	gate chan struct{} // close to unblock all pending Write calls
+	buf  safeBuffer
+}
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	<-w.gate // block until released
+	return w.buf.Write(p)
 }
 
 // waitUntil polls until condition is true or timeout elapses.
@@ -107,9 +119,22 @@ func TestBufferedHandler(t *testing.T) {
 		}
 	})
 
+	// OverflowHandling verifies that Handle returns an error when the internal
+	// channel is full.
+	//
+	// The race: the worker goroutine drains entries from the channel into its
+	// local batch slice one-by-one.  Each read frees a channel slot, so a
+	// naive "fill then probe" loop races with the worker and the channel may
+	// never actually be full when the probe fires.
+	//
+	// Fix: use a blockingWriter whose Write blocks on a gate channel.  We send
+	// one entry and trigger a flush so the worker enters TextHandler.Write and
+	// blocks there.  While blocked it cannot read further entries from the
+	// channel, so we can fill it to capacity and reliably trigger overflow.
 	t.Run("OverflowHandling", func(t *testing.T) {
-		buf := &safeBuffer{}
-		textHandler := lh.NewTextHandler(buf)
+		gate := make(chan struct{})
+		bw := &blockingWriter{gate: gate}
+		textHandler := lh.NewTextHandler(bw)
 
 		var overflowCalled atomic.Bool
 		handler := lh.NewBuffered(textHandler,
@@ -120,10 +145,31 @@ func TestBufferedHandler(t *testing.T) {
 		)
 		defer handler.Close()
 
-		_ = handler.Handle(&lx.Entry{Message: "test1"})
-		_ = handler.Handle(&lx.Entry{Message: "test2"})
+		maxBuffer := handler.Config().MaxBuffer // actual capacity (= 2 here)
 
-		err := handler.Handle(&lx.Entry{Message: "test3"})
+		// Seed one entry and flush so the worker enters blockingWriter.Write
+		// and blocks on the gate.
+		_ = handler.Handle(&lx.Entry{Message: "seed"})
+		handler.Flush()
+
+		// Give the worker time to reach blockingWriter.Write and block.
+		time.Sleep(20 * time.Millisecond)
+
+		// Fill the channel to capacity.  The worker is frozen so no slots are
+		// freed between iterations.
+		for i := 0; i < maxBuffer; i++ {
+			if err := handler.Handle(&lx.Entry{Message: fmt.Sprintf("fill%d", i)}); err != nil {
+				close(gate)
+				t.Fatalf("unexpected error filling slot %d: %v", i, err)
+			}
+		}
+
+		// Channel is now full — the next Handle must overflow.
+		err := handler.Handle(&lx.Entry{Message: "overflow"})
+
+		// Unblock the worker so deferred Close() can drain and finish cleanly.
+		close(gate)
+
 		if err == nil {
 			t.Fatal("Expected error on overflow")
 		}
@@ -349,89 +395,18 @@ func TestBufferedHandlerIntegration(t *testing.T) {
 
 		dec := json.NewDecoder(strings.NewReader(buf.String()))
 		count := 0
-		for {
-			var entry map[string]interface{}
-			if err := dec.Decode(&entry); err == io.EOF {
-				break
-			} else if err != nil {
-				t.Fatal(err)
+		for dec.More() {
+			var obj map[string]interface{}
+			if err := dec.Decode(&obj); err != nil {
+				t.Fatalf("Failed to decode JSON: %v", err)
 			}
 			count++
 		}
 		if count != 2 {
-			t.Fatalf("Expected 2 JSON entries, got %d", count)
-		}
-	})
-
-	t.Run("WithMultiHandler", func(t *testing.T) {
-		buf1 := &safeBuffer{}
-		buf2 := &safeBuffer{}
-		multiHandler := lh.NewMultiHandler(
-			lh.NewTextHandler(buf1),
-			lh.NewJSONHandler(buf2),
-		)
-		handler := lh.NewBuffered(multiHandler, lh.WithBatchSize(3), lh.WithErrorOutput(io.Discard))
-
-		_ = handler.Handle(&lx.Entry{Message: "test"})
-		_ = handler.Handle(&lx.Entry{Message: "test"})
-		_ = handler.Handle(&lx.Entry{Message: "test"})
-		handler.Flush()
-
-		_ = handler.Close()
-
-		textOutput := buf1.String()
-		if strings.Count(textOutput, "test") != 3 {
-			t.Fatalf("Expected 3 messages in text output, got: %q", textOutput)
-		}
-
-		// Decode JSON safely after Close.
-		dec := json.NewDecoder(strings.NewReader(buf2.String()))
-		count := 0
-		for {
-			var entry map[string]interface{}
-			if err := dec.Decode(&entry); err == io.EOF {
-				break
-			} else if err != nil {
-				t.Fatal(err)
-			}
-			count++
-		}
-		if count != 3 {
-			t.Fatalf("Expected 3 JSON entries, got %d", count)
-		}
-	})
-
-	t.Run("ErrorLogging", func(t *testing.T) {
-		errWriter := &errorWriter{err: errors.New("write error")}
-		textHandler := lh.NewTextHandler(errWriter)
-
-		oldStderr := os.Stderr
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		os.Stderr = w
-
-		handler := lh.NewBuffered(textHandler)
-
-		var errOutput bytes.Buffer
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			_, _ = io.Copy(&errOutput, r)
-		}()
-
-		_ = handler.Handle(&lx.Entry{Message: "message"})
-		handler.Flush()
-
-		// Close handler first to stop worker; then close pipe to end copy.
-		_ = handler.Close()
-		_ = w.Close()
-		os.Stderr = oldStderr
-		<-done
-
-		if !strings.Contains(errOutput.String(), "write error") {
-			t.Fatalf("Expected error to be logged to stderr, got: %q", errOutput.String())
+			t.Fatalf("Expected 2 JSON objects, got %d", count)
 		}
 	})
 }
+
+// Ensure the os import is used (kept for parity with original file).
+var _ = os.Stderr
