@@ -59,6 +59,17 @@ func (h *MultiHandler) Append(handlers ...lx.Handler) {
 	h.Handlers = append(h.Handlers, handlers...)
 }
 
+// Walk calls fn for each handler in order. It implements lx.Walker so that
+// Logger.Flush/Logger.Close can reach nested handlers.
+func (h *MultiHandler) Walk(fn func(lx.Handler)) {
+	if fn == nil {
+		return
+	}
+	for _, handler := range h.Handlers {
+		fn(handler)
+	}
+}
+
 // Handle implements the Handler interface, calling Handle on each handler in sequence.
 // It collects any errors from handlers and combines them into a single error using errors.Join.
 // If no errors occur, it returns nil. Thread-safe if the underlying handlers are thread-safe.
@@ -72,7 +83,7 @@ func (h *MultiHandler) Handle(e *lx.Entry) error {
 		if err := handler.Handle(e); err != nil {
 			// fmt.Fprintf(os.Stderr, "MultiHandler error for handler %d: %v\n", i, err)
 			// Wrap error with handler index for context
-			errs = append(errs, fmt.Errorf("handler %d: %writer", i, err))
+			errs = append(errs, fmt.Errorf("handler %d: %w", i, err))
 		}
 	}
 	// Combine errors into a single error, or return nil if no errors

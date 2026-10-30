@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/olekukonko/ll/lx"
@@ -16,6 +17,15 @@ var textBufPool = sync.Pool{
 	New: func() any {
 		return new(bytes.Buffer)
 	},
+}
+
+// textConfig is an immutable snapshot of a TextHandler's settings. It is
+// republished (never mutated) whenever the configuration changes, which keeps
+// the hot path lock-free.
+type textConfig struct {
+	writer     io.Writer
+	showTime   bool
+	timeFormat string
 }
 
 // WithTextTimeFormat enables timestamp display and optionally sets a custom time format.
@@ -34,19 +44,21 @@ func WithTextTimeFormat(format string) TextOption {
 // Setting show to true will prepend timestamps to all subsequent regular log outputs.
 func WithTextShowTime(show bool) TextOption {
 	return func(t *TextHandler) {
-		t.showTime = show
+		t.update(func(c *textConfig) { c.showTime = show })
 	}
 }
 
 // TextHandler is a handler that outputs log entries as plain text.
 // It formats log entries with namespace, level, message, fields, and optional stack traces,
 // writing the result to the provided writer.
-// Thread-safe if the underlying writer is thread-safe.
+//
+// Configuration is published through an atomic snapshot, so Handle never takes a
+// configuration lock; only the final write is serialised (wmu) to keep entries
+// from interleaving.
 type TextHandler struct {
-	writer     io.Writer // Destination for formatted log output
-	showTime   bool      // Whether to display timestamps
-	timeFormat string    // Format for timestamps (defaults to time.RFC3339)
-	mu         sync.Mutex
+	cfg atomic.Pointer[textConfig]
+	mu  sync.Mutex // serialises configuration updates
+	wmu sync.Mutex // serialises writes so entries never interleave
 }
 
 // NewTextHandler creates a new TextHandler writing to the specified writer.
@@ -57,11 +69,12 @@ type TextHandler struct {
 //	logger := ll.New("app").Enable().Handler(handler)
 //	logger.Info("Test") // Output: [app] INFO: Test
 func NewTextHandler(w io.Writer, opts ...TextOption) *TextHandler {
-	t := &TextHandler{
+	t := &TextHandler{}
+	t.cfg.Store(&textConfig{
 		writer:     w,
 		showTime:   false,
 		timeFormat: time.RFC3339,
-	}
+	})
 
 	for _, opt := range opts {
 		opt(t)
@@ -70,25 +83,42 @@ func NewTextHandler(w io.Writer, opts ...TextOption) *TextHandler {
 	return t
 }
 
+// snapshot returns the current immutable configuration.
+func (h *TextHandler) snapshot() *textConfig {
+	if c := h.cfg.Load(); c != nil {
+		return c
+	}
+	return &textConfig{timeFormat: time.RFC3339}
+}
+
+// update applies a mutation to a fresh copy of the configuration and publishes it.
+func (h *TextHandler) update(fn func(*textConfig)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	next := *h.snapshot()
+	fn(&next)
+	h.cfg.Store(&next)
+}
+
 // Timestamped enables or disables timestamp display and optionally sets a custom time format.
 // If format is empty, defaults to RFC3339.
 // Example:
 //
-//	handler := NewTextHandler(os.Stdout).TextWithTime(true, time.StampMilli)
+//	handler := NewTextHandler(os.Stdout).Timestamped(true, time.StampMilli)
 //	// Output: Jan 02 15:04:05.000 [app] INFO: Test
 func (h *TextHandler) Timestamped(enable bool, format ...string) {
-	h.showTime = enable
-	if len(format) > 0 && format[0] != "" {
-		h.timeFormat = format[0]
-	}
+	h.update(func(c *textConfig) {
+		c.showTime = enable
+		if len(format) > 0 && format[0] != "" {
+			c.timeFormat = format[0]
+		}
+	})
 }
 
 // Output sets a new writer for the TextHandler.
 // Thread-safe - safe for concurrent use.
 func (h *TextHandler) Output(w io.Writer) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.writer = w
+	h.update(func(c *textConfig) { c.writer = w })
 }
 
 // Handle processes a log entry and writes it as plain text.
@@ -99,19 +129,37 @@ func (h *TextHandler) Output(w io.Writer) {
 //
 //	handler.Handle(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes "INFO: test"
 func (h *TextHandler) Handle(e *lx.Entry) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if e.Class == lx.ClassDump {
-		return h.handleDumpOutput(e)
+	// Formatting happens outside any lock; only the final write is serialised.
+	cfg := h.snapshot()
+	if cfg.writer == nil {
+		return nil
 	}
 
-	if e.Class == lx.ClassRaw {
-		_, err := h.writer.Write([]byte(e.Message))
-		return err
+	switch e.Class {
+	case lx.ClassDump:
+		return h.handleDumpOutput(cfg.writer, cfg.showTime, cfg.timeFormat, e)
+	case lx.ClassRaw:
+		return h.writeString(cfg.writer, e.Message)
 	}
 
-	return h.handleRegularOutput(e)
+	return h.handleRegularOutput(cfg.writer, cfg.showTime, cfg.timeFormat, e)
+}
+
+// writeString writes s to w while holding the write lock, so concurrent entries
+// never interleave within the same handler.
+func (h *TextHandler) writeString(w io.Writer, s string) error {
+	h.wmu.Lock()
+	_, err := io.WriteString(w, s)
+	h.wmu.Unlock()
+	return err
+}
+
+// writeBytes writes b to w while holding the write lock.
+func (h *TextHandler) writeBytes(w io.Writer, b []byte) error {
+	h.wmu.Lock()
+	_, err := w.Write(b)
+	h.wmu.Unlock()
+	return err
 }
 
 // handleRegularOutput handles normal log entries.
@@ -121,13 +169,21 @@ func (h *TextHandler) Handle(e *lx.Entry) error {
 // Example (internal usage):
 //
 //	h.handleRegularOutput(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes "INFO: test"
-func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
+func (h *TextHandler) handleRegularOutput(w io.Writer, showTime bool, timeFormat string, e *lx.Entry) error {
 	buf := textBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer textBufPool.Put(buf)
 
-	if h.showTime {
-		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+	if showTime {
+		buf.WriteString(e.Timestamp.Format(timeFormat))
+		buf.WriteString(lx.Space)
+	}
+
+	// Caller location, when caller reporting is enabled on the logger.
+	if e.Caller != "" {
+		buf.WriteString(lx.LeftBracket)
+		buf.WriteString(e.Caller)
+		buf.WriteString(lx.RightBracket)
 		buf.WriteString(lx.Space)
 	}
 
@@ -183,8 +239,7 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 		buf.WriteString(lx.Newline)
 	}
 
-	_, err := h.writer.Write(buf.Bytes())
-	return err
+	return h.writeBytes(w, buf.Bytes())
 }
 
 // handleDumpOutput specially formats hex dump output (plain text version).
@@ -193,13 +248,13 @@ func (h *TextHandler) handleRegularOutput(e *lx.Entry) error {
 // Example (internal usage):
 //
 //	h.handleDumpOutput(&lx.Entry{Class: lx.ClassDump, Message: "pos 00 hex: 61"}) // Writes "---- BEGIN DUMP ----\npos 00 hex: 61\n---- END DUMP ----\n"
-func (h *TextHandler) handleDumpOutput(e *lx.Entry) error {
+func (h *TextHandler) handleDumpOutput(w io.Writer, showTime bool, timeFormat string, e *lx.Entry) error {
 	buf := textBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer textBufPool.Put(buf)
 
-	if h.showTime {
-		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+	if showTime {
+		buf.WriteString(e.Timestamp.Format(timeFormat))
 		buf.WriteString(lx.Newline)
 	}
 
@@ -207,8 +262,7 @@ func (h *TextHandler) handleDumpOutput(e *lx.Entry) error {
 	buf.WriteString(e.Message)
 	buf.WriteString("---- END DUMP ----\n\n")
 
-	_, err := h.writer.Write(buf.Bytes())
-	return err
+	return h.writeBytes(w, buf.Bytes())
 }
 
 // formatStack formats a stack trace for plain text output.

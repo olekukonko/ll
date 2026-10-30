@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/olekukonko/ll/lx"
@@ -254,16 +255,51 @@ var colorBufPool = sync.Pool{
 	},
 }
 
+// colorConfig is an immutable snapshot of a ColorizedHandler's mutable settings.
+type colorConfig struct {
+	writer     io.Writer
+	showTime   bool
+	timeFormat string
+}
+
 // ColorizedHandler is a handler that outputs log entries with ANSI color codes.
+//
+// Mutable settings (writer, timestamp options) are published as an immutable
+// snapshot: Handle never takes the configuration lock, and only the final write
+// is serialised so entries cannot interleave.
 type ColorizedHandler struct {
-	writer      io.Writer
 	palette     Palette
-	showTime    bool
-	timeFormat  string
-	mu          sync.Mutex
 	noColor     bool           // Whether to disable colors entirely
 	intensity   ColorIntensity // Color intensity level
 	colorFields bool           // Whether to colorize fields (default: true)
+	cfg         atomic.Pointer[colorConfig]
+	mu          sync.Mutex // serialises configuration updates
+	wmu         sync.Mutex // serialises writes
+}
+
+// snapshot returns the current immutable configuration.
+func (h *ColorizedHandler) snapshot() *colorConfig {
+	if c := h.cfg.Load(); c != nil {
+		return c
+	}
+	return &colorConfig{timeFormat: time.RFC3339}
+}
+
+// update applies a mutation to a fresh copy of the configuration and publishes it.
+func (h *ColorizedHandler) update(fn func(*colorConfig)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	next := *h.snapshot()
+	fn(&next)
+	h.cfg.Store(&next)
+}
+
+// writeBytes writes b to w while holding the write lock.
+func (h *ColorizedHandler) writeBytes(w io.Writer, b []byte) error {
+	h.wmu.Lock()
+	_, err := w.Write(b)
+	h.wmu.Unlock()
+	return err
 }
 
 // ColorOption defines a configuration function for ColorizedHandler.
@@ -298,7 +334,7 @@ func WithColorField(enable bool) ColorOption {
 // WithColorShowTime enables or disables the display of timestamps.
 func WithColorShowTime(show bool) ColorOption {
 	return func(c *ColorizedHandler) {
-		c.showTime = show
+		c.update(func(cfg *colorConfig) { cfg.showTime = show })
 	}
 }
 
@@ -330,13 +366,11 @@ func WithColorTheme(theme string) ColorOption {
 // NewColorizedHandler creates a new ColorizedHandler writing to the specified writer.
 func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
 	c := &ColorizedHandler{
-		writer:      w,
-		showTime:    false,
-		timeFormat:  time.RFC3339,
 		noColor:     false,
 		intensity:   IntensityNormal,
 		colorFields: true, // Default: enable field coloring
 	}
+	c.cfg.Store(&colorConfig{writer: w, showTime: false, timeFormat: time.RFC3339})
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -345,45 +379,56 @@ func NewColorizedHandler(w io.Writer, opts ...ColorOption) *ColorizedHandler {
 }
 
 func (h *ColorizedHandler) Output(w io.Writer) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.writer = w
+	h.update(func(c *colorConfig) { c.writer = w })
 }
 
 // Handle processes a log entry and writes it with ANSI color codes.
 func (h *ColorizedHandler) Handle(e *lx.Entry) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	cfg := h.snapshot()
+	if cfg.writer == nil {
+		return nil
+	}
 	switch e.Class {
 	case lx.ClassDump:
-		return h.handleDumpOutput(e)
+		return h.handleDumpOutput(cfg, e)
 	case lx.ClassJSON, lx.ClassOutput:
-		return h.handleJSONOutput(e)
+		return h.handleJSONOutput(cfg, e)
 	case lx.ClassInspect:
-		return h.handleInspectOutput(e)
+		return h.handleInspectOutput(cfg, e)
 	case lx.ClassRaw:
-		_, err := h.writer.Write([]byte(e.Message))
+		h.wmu.Lock()
+		_, err := io.WriteString(cfg.writer, e.Message)
+		h.wmu.Unlock()
 		return err
 	default:
-		return h.handleRegularOutput(e)
+		return h.handleRegularOutput(cfg, e)
 	}
 }
 
 // Timestamped enables or disables timestamp display.
 func (h *ColorizedHandler) Timestamped(enable bool, format ...string) {
-	h.showTime = enable
-	if len(format) > 0 && format[0] != "" {
-		h.timeFormat = format[0]
-	}
+	h.update(func(c *colorConfig) {
+		c.showTime = enable
+		if len(format) > 0 && format[0] != "" {
+			c.timeFormat = format[0]
+		}
+	})
 }
 
 // handleRegularOutput handles normal log entries.
-func (h *ColorizedHandler) handleRegularOutput(e *lx.Entry) error {
+func (h *ColorizedHandler) handleRegularOutput(cfg *colorConfig, e *lx.Entry) error {
 	buf := colorBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer colorBufPool.Put(buf)
-	if h.showTime {
-		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+	if cfg.showTime {
+		buf.WriteString(e.Timestamp.Format(cfg.timeFormat))
+		buf.WriteString(lx.Space)
+	}
+	// Caller location, when caller reporting is enabled on the logger.
+	if e.Caller != "" {
+		buf.WriteString(lx.LeftBracket)
+		buf.WriteString(e.Caller)
+		buf.WriteString(lx.RightBracket)
 		buf.WriteString(lx.Space)
 	}
 	h.formatNamespace(buf, e)
@@ -396,17 +441,17 @@ func (h *ColorizedHandler) handleRegularOutput(e *lx.Entry) error {
 	if e.Level != lx.LevelNone {
 		buf.WriteString(lx.Newline)
 	}
-	_, err := h.writer.Write(buf.Bytes())
+	err := h.writeBytes(cfg.writer, buf.Bytes())
 	return err
 }
 
 // handleJSONOutput handles JSON log entries.
-func (h *ColorizedHandler) handleJSONOutput(e *lx.Entry) error {
+func (h *ColorizedHandler) handleJSONOutput(cfg *colorConfig, e *lx.Entry) error {
 	buf := colorBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer colorBufPool.Put(buf)
-	if h.showTime {
-		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+	if cfg.showTime {
+		buf.WriteString(e.Timestamp.Format(cfg.timeFormat))
 		buf.WriteString(lx.Newline)
 	}
 	if e.Namespace != "" {
@@ -415,24 +460,24 @@ func (h *ColorizedHandler) handleJSONOutput(e *lx.Entry) error {
 	}
 	h.colorizeJSON(buf, e.Message)
 	buf.WriteString(lx.Newline)
-	_, err := h.writer.Write(buf.Bytes())
+	err := h.writeBytes(cfg.writer, buf.Bytes())
 	return err
 }
 
 // handleInspectOutput handles inspect log entries.
-func (h *ColorizedHandler) handleInspectOutput(e *lx.Entry) error {
+func (h *ColorizedHandler) handleInspectOutput(cfg *colorConfig, e *lx.Entry) error {
 	buf := colorBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer colorBufPool.Put(buf)
-	if h.showTime {
-		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+	if cfg.showTime {
+		buf.WriteString(e.Timestamp.Format(cfg.timeFormat))
 		buf.WriteString(lx.Space)
 	}
 	h.formatNamespace(buf, e)
 	h.formatLevel(buf, e)
 	h.colorizeInspect(buf, e.Message)
 	buf.WriteString(lx.Newline)
-	_, err := h.writer.Write(buf.Bytes())
+	err := h.writeBytes(cfg.writer, buf.Bytes())
 	return err
 }
 
@@ -840,12 +885,12 @@ func (h *ColorizedHandler) formatStack(b *bytes.Buffer, stack []byte) {
 }
 
 // handleDumpOutput formats hex dump output with ANSI color codes.
-func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
+func (h *ColorizedHandler) handleDumpOutput(cfg *colorConfig, e *lx.Entry) error {
 	buf := colorBufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer colorBufPool.Put(buf)
-	if h.showTime {
-		buf.WriteString(e.Timestamp.Format(h.timeFormat))
+	if cfg.showTime {
+		buf.WriteString(e.Timestamp.Format(cfg.timeFormat))
 		buf.WriteString(lx.Newline)
 	}
 	buf.WriteString(h.palette.Title)
@@ -888,7 +933,7 @@ func (h *ColorizedHandler) handleDumpOutput(e *lx.Entry) error {
 	buf.WriteString("---- END DUMP ----")
 	buf.WriteString(h.palette.Reset)
 	buf.WriteString("\n")
-	_, err := h.writer.Write(buf.Bytes())
+	err := h.writeBytes(cfg.writer, buf.Bytes())
 	return err
 }
 

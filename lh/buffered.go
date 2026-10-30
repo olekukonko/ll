@@ -147,28 +147,7 @@ func NewBuffered[H lx.Handler](handler H, opts ...BufferingOpt) *Buffered[H] {
 // cloneEntry creates a deep copy of an entry for safe asynchronous processing.
 // The original entry belongs to the logger's pool and is reused immediately after Handle() returns.
 func (b *Buffered[H]) cloneEntry(e *lx.Entry) *lx.Entry {
-	entryCopy := &lx.Entry{
-		Timestamp: e.Timestamp,
-		Level:     e.Level,
-		Message:   e.Message,
-		Namespace: e.Namespace,
-		Style:     e.Style,
-		Class:     e.Class,
-		Error:     e.Error,
-		Id:        e.Id,
-	}
-
-	if len(e.Fields) > 0 {
-		entryCopy.Fields = make(lx.Fields, len(e.Fields))
-		copy(entryCopy.Fields, e.Fields)
-	}
-
-	if len(e.Stack) > 0 {
-		entryCopy.Stack = make([]byte, len(e.Stack))
-		copy(entryCopy.Stack, e.Stack)
-	}
-
-	return entryCopy
+	return CloneEntry(e)
 }
 
 // Handle implements the lx.Handler interface.

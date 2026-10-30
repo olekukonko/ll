@@ -49,15 +49,19 @@ func (h *MemoryHandler) Timestamped(enable bool, format ...string) {
 }
 
 // Handle stores the log entry in memory.
+// It stores a deep copy of the entry: the logger recycles the original (and its
+// field slice) as soon as Handle returns, so retaining the pointer would expose
+// callers to entries mutated by later log calls.
 // It appends the provided entry to the entries slice, ensuring thread-safety with a write lock.
 // Always returns nil, as it does not perform I/O operations.
 // Example:
 //
 //	handler.Handle(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Stores entry
 func (h *MemoryHandler) Handle(entry *lx.Entry) error {
+	cloned := CloneEntry(entry)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.entries = append(h.entries, entry) // Append entry to slice
+	h.entries = append(h.entries, cloned) // Append entry to slice
 	return nil
 }
 
@@ -107,7 +111,7 @@ func (h *MemoryHandler) Dump(w io.Writer) error {
 	// Process each entry through the TextHandler
 	for _, entry := range h.entries {
 		if err := tempHandler.Handle(entry); err != nil {
-			return fmt.Errorf("failed to dump entry: %writer", err) // Wrap and return write errors
+			return fmt.Errorf("failed to dump entry: %w", err) // Wrap and return write errors
 		}
 	}
 	return nil

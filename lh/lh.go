@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/olekukonko/ll/lx"
 )
 
 // rightPad pads a string with spaces on the right to reach the specified length.
@@ -25,6 +27,54 @@ func rightPad(str string, length int) string {
 type stringWriter interface {
 	WriteString(s string) (int, error)
 	Write(p []byte) (n int, err error)
+}
+
+// HandlerFunc adapts a plain function to the lx.Handler interface, mirroring
+// http.HandlerFunc. It is handy for tests, one-off sinks and on-the-fly filtering.
+//
+// Example:
+//
+//	logger.Handler(lh.NewHandlerFunc(func(e *lx.Entry) error {
+//	    fmt.Println(e.Message)
+//	    return nil
+//	}))
+type HandlerFunc func(*lx.Entry) error
+
+// Handle calls f(e).
+func (f HandlerFunc) Handle(e *lx.Entry) error { return f(e) }
+
+// NewHandlerFunc wraps fn as an lx.Handler.
+func NewHandlerFunc(fn func(*lx.Entry) error) HandlerFunc { return HandlerFunc(fn) }
+
+// CloneEntry returns a deep copy of an entry.
+//
+// Handlers must copy an entry before retaining it beyond the Handle call: the
+// logger recycles *lx.Entry (including its Fields slice) as soon as Handle
+// returns, so keeping the original pointer is a data race waiting to happen.
+func CloneEntry(e *lx.Entry) *lx.Entry {
+	if e == nil {
+		return nil
+	}
+	entryCopy := &lx.Entry{
+		Timestamp: e.Timestamp,
+		Level:     e.Level,
+		Message:   e.Message,
+		Namespace: e.Namespace,
+		Style:     e.Style,
+		Class:     e.Class,
+		Error:     e.Error,
+		Caller:    e.Caller,
+		Id:        e.Id,
+	}
+	if len(e.Fields) > 0 {
+		entryCopy.Fields = make(lx.Fields, len(e.Fields))
+		copy(entryCopy.Fields, e.Fields)
+	}
+	if len(e.Stack) > 0 {
+		entryCopy.Stack = make([]byte, len(e.Stack))
+		copy(entryCopy.Stack, e.Stack)
+	}
+	return entryCopy
 }
 
 // writeFieldValue writes a field value to the builder using type switches

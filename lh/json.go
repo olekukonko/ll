@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -35,29 +36,38 @@ var jsonOutputPool = sync.Pool{
 	},
 }
 
+// jsonConfig is an immutable snapshot of a JSONHandler's settings.
+type jsonConfig struct {
+	writer  io.Writer
+	timeFmt string
+	pretty  bool
+}
+
 // JSONHandler is a handler that outputs log entries as JSON objects.
 // It formats log entries with timestamp, level, message, namespace, fields, and optional
 // stack traces or dump segments, writing the result to the provided writer.
-// Thread-safe with a mutex to protect concurrent writes.
+//
+// Configuration is published through an atomic snapshot so Handle never takes a
+// configuration lock; only the final write is serialised (wmu).
 type JSONHandler struct {
-	writer  io.Writer  // Destination for JSON output
-	timeFmt string     // Format for timestamp (default: RFC3339Nano)
-	pretty  bool       // Enable pretty printing with indentation if true
-	mu      sync.Mutex // Protects concurrent access to writer
+	cfg atomic.Pointer[jsonConfig]
+	mu  sync.Mutex // serialises configuration updates
+	wmu sync.Mutex // serialises writes so entries never interleave
 }
 
 // JsonOutput represents the JSON structure for a log entry.
 // It includes all relevant log data, such as timestamp, level, message, and optional
 // stack trace or dump segments, serialized as a JSON object.
 type JsonOutput struct {
-	Time      string                 `json:"ts"`     // Timestamp in specified format
-	Level     string                 `json:"lvl"`    // Log level (e.g., "INFO")
-	Class     string                 `json:"class"`  // Entry class (e.g., "Text", "Dump")
-	Msg       string                 `json:"msg"`    // Log message
-	Namespace string                 `json:"ns"`     // Namespace path
-	Stack     []byte                 `json:"stack"`  // Stack trace (if present)
-	Dump      []dumpSegment          `json:"dump"`   // Hex/ASCII dump segments (for ClassDump)
-	Fields    map[string]interface{} `json:"fields"` // Custom fields
+	Time      string                 `json:"ts"`               // Timestamp in specified format
+	Level     string                 `json:"lvl"`              // Log level (e.g., "INFO")
+	Class     string                 `json:"class"`            // Entry class (e.g., "Text", "Dump")
+	Msg       string                 `json:"msg"`              // Log message
+	Namespace string                 `json:"ns"`               // Namespace path
+	Caller    string                 `json:"caller,omitempty"` // Caller location (file.go:42)
+	Stack     []byte                 `json:"stack"`            // Stack trace (if present)
+	Dump      []dumpSegment          `json:"dump"`             // Hex/ASCII dump segments (for ClassDump)
+	Fields    map[string]interface{} `json:"fields"`           // Custom fields
 }
 
 // dumpSegment represents a single segment of a hex/ASCII dump.
@@ -77,15 +87,41 @@ type dumpSegment struct {
 //	logger := ll.New("app").Enable().Handler(handler)
 //	logger.Info("Test") // Output: {"ts":"...","lvl":"INFO","class":"Text","msg":"Test","ns":"app","stack":null,"dump":null,"fields":null}
 func NewJSONHandler(w io.Writer, opts ...func(*JSONHandler)) *JSONHandler {
-	h := &JSONHandler{
+	h := &JSONHandler{}
+	h.cfg.Store(&jsonConfig{
 		writer:  w,                // Set output writer
 		timeFmt: time.RFC3339Nano, // Default timestamp format
-	}
+	})
 	// Apply configuration options
 	for _, opt := range opts {
 		opt(h)
 	}
 	return h
+}
+
+// snapshot returns the current immutable configuration.
+func (h *JSONHandler) snapshot() *jsonConfig {
+	if c := h.cfg.Load(); c != nil {
+		return c
+	}
+	return &jsonConfig{timeFmt: time.RFC3339Nano}
+}
+
+// update applies a mutation to a fresh copy of the configuration and publishes it.
+func (h *JSONHandler) update(fn func(*jsonConfig)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	next := *h.snapshot()
+	fn(&next)
+	h.cfg.Store(&next)
+}
+
+// writeBytes writes b to w while holding the write lock.
+func (h *JSONHandler) writeBytes(w io.Writer, b []byte) error {
+	h.wmu.Lock()
+	_, err := w.Write(b)
+	h.wmu.Unlock()
+	return err
 }
 
 // Handle processes a log entry and writes it as JSON.
@@ -96,21 +132,21 @@ func NewJSONHandler(w io.Writer, opts ...func(*JSONHandler)) *JSONHandler {
 //
 //	handler.Handle(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes JSON object
 func (h *JSONHandler) Handle(e *lx.Entry) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	cfg := h.snapshot()
+	if cfg.writer == nil {
+		return nil
+	}
 	// Handle dump entries separately
 	if e.Class == lx.ClassDump {
-		return h.handleDump(e)
+		return h.handleDump(cfg, e)
 	}
 	// Handle standard log entries
-	return h.handleRegular(e)
+	return h.handleRegular(cfg, e)
 }
 
 // Output sets the Writer destination for JSONHandler's output, ensuring thread safety with a mutex lock.
 func (h *JSONHandler) Output(w io.Writer) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.writer = w
+	h.update(func(c *jsonConfig) { c.writer = w })
 }
 
 // handleRegular handles standard log entries (non-dump).
@@ -120,7 +156,7 @@ func (h *JSONHandler) Output(w io.Writer) {
 // Example (internal usage):
 //
 //	h.handleRegular(&lx.Entry{Message: "test", Level: lx.LevelInfo}) // Writes JSON object
-func (h *JSONHandler) handleRegular(e *lx.Entry) error {
+func (h *JSONHandler) handleRegular(cfg *jsonConfig, e *lx.Entry) error {
 	// Get fieldsMap from pool to avoid allocation
 	fieldsMap := fieldsMapPool.Get().(map[string]interface{})
 	// Clear any existing keys from previous use
@@ -134,11 +170,12 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 
 	// Get JsonOutput from pool
 	entry := jsonOutputPool.Get().(*JsonOutput)
-	entry.Time = e.Timestamp.Format(h.timeFmt)
+	entry.Time = e.Timestamp.Format(cfg.timeFmt)
 	entry.Level = e.Level.String()
 	entry.Class = e.Class.String()
 	entry.Msg = e.Message
 	entry.Namespace = e.Namespace
+	entry.Caller = e.Caller
 	entry.Dump = nil
 	entry.Fields = fieldsMap
 	entry.Stack = e.Stack
@@ -163,7 +200,7 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 
 	// Create JSON encoder writing to buffer (uses go-json for 2-5x speedup)
 	enc := json.NewEncoder(buf)
-	if h.pretty {
+	if cfg.pretty {
 		// Enable indentation for pretty printing
 		enc.SetIndent("", "  ")
 	}
@@ -175,7 +212,7 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 		return err
 	}
 	// Write buffer to underlying writer in one go
-	_, err = h.writer.Write(buf.Bytes())
+	err = h.writeBytes(cfg.writer, buf.Bytes())
 	return err
 }
 
@@ -186,7 +223,7 @@ func (h *JSONHandler) handleRegular(e *lx.Entry) error {
 // Example (internal usage):
 //
 //	h.handleDump(&lx.Entry{Class: lx.ClassDump, Message: "pos 00 hex: 61 62 'ab'"}) // Writes JSON with dump segments
-func (h *JSONHandler) handleDump(e *lx.Entry) error {
+func (h *JSONHandler) handleDump(cfg *jsonConfig, e *lx.Entry) error {
 	var segments []dumpSegment
 	lines := strings.Split(e.Message, "\n")
 	// Parse each line of the dump message
@@ -223,11 +260,12 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 
 	// Get JsonOutput from pool
 	entry := jsonOutputPool.Get().(*JsonOutput)
-	entry.Time = e.Timestamp.Format(h.timeFmt)
+	entry.Time = e.Timestamp.Format(cfg.timeFmt)
 	entry.Level = e.Level.String()
 	entry.Class = e.Class.String()
 	entry.Msg = "dumping segments"
 	entry.Namespace = e.Namespace
+	entry.Caller = e.Caller
 	entry.Dump = segments
 	entry.Fields = fieldsMap
 	entry.Stack = e.Stack
@@ -249,7 +287,7 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 
 	// Encode JSON output with dump segments to buffer
 	enc := json.NewEncoder(buf)
-	if h.pretty {
+	if cfg.pretty {
 		enc.SetIndent("", "  ")
 	}
 	err := enc.Encode(entry)
@@ -258,6 +296,6 @@ func (h *JSONHandler) handleDump(e *lx.Entry) error {
 		return err
 	}
 	// Write buffer to underlying writer
-	_, err = h.writer.Write(buf.Bytes())
+	err = h.writeBytes(cfg.writer, buf.Bytes())
 	return err
 }
