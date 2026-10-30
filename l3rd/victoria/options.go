@@ -165,6 +165,41 @@ func WithRetry(count int) Option {
 	}
 }
 
+// WithBatching enables asynchronous batching. Entries are accumulated and sent
+// as a single NDJSON request once size entries are queued or wait elapses
+// (whichever comes first), which turns N HTTP round-trips into one.
+//
+// It is opt-in: with no WithBatching call the handler keeps the original
+// behaviour of sending each entry synchronously from the caller's goroutine.
+// When the queue is full, Handle falls back to a synchronous send instead of
+// dropping the entry, and Close flushes the remaining queue.
+//
+// Example:
+//
+//	victoria.WithBatching(500, 2*time.Second)
+func WithBatching(size int, wait time.Duration) Option {
+	return func(c *Config) {
+		if size > 0 {
+			c.BatchSize = size
+		}
+		if wait > 0 {
+			c.BatchWait = wait
+		}
+	}
+}
+
+// WithErrorHandler registers a callback for asynchronous delivery errors
+// (batch sends). Synchronous sends still return their error to the caller.
+//
+// Example:
+//
+//	victoria.WithErrorHandler(func(err error) { log.Println("victoria:", err) })
+func WithErrorHandler(fn func(error)) Option {
+	return func(c *Config) {
+		c.OnError = fn
+	}
+}
+
 // WithDevMode enables development mode features.
 // When enabled:
 // - Handler pings VictoriaLogs endpoint on initialization

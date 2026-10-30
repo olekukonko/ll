@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -94,6 +95,23 @@ type Config struct {
 	// Default: 0 (no retry)
 	RetryCount int
 
+	// BatchSize is the number of log lines sent per HTTP request when batching
+	// is enabled. Zero (the default) keeps the original behaviour: every entry
+	// is sent in its own request, synchronously, from the caller's goroutine.
+	//
+	// Set it with WithBatching(size, wait). Enabling batching moves delivery (and
+	// retries) to a background goroutine, so logging no longer blocks on the
+	// network.
+	BatchSize int
+
+	// BatchWait is the maximum time a partial batch waits before being sent.
+	// Default: 0 (no batching). Only meaningful when BatchSize > 0.
+	BatchWait time.Duration
+
+	// OnError, when set, receives asynchronous delivery errors (batch sends).
+	// Synchronous sends still return their error to the caller.
+	OnError func(error)
+
 	// DevMode enables development features:
 	// - Ping endpoint on initialization
 	// - Add debug metadata to log entries
@@ -130,7 +148,15 @@ type Config struct {
 type Victoria struct {
 	config *Config      // Immutable configuration
 	client *http.Client // HTTP client for VictoriaLogs requests
+	url    string       // Cached ingestion URL (endpoint + query parameters)
 	mu     sync.Mutex   // Mutex for thread-safe operations
+
+	// Batching state. All of it stays zero when batching is disabled, which
+	// keeps the default (synchronous) code path identical to previous versions.
+	batchCh   chan map[string]interface{}
+	done      chan struct{}
+	wg        sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // New creates and initializes a new VictoriaLogs handler.
@@ -214,6 +240,21 @@ func New(opts ...Option) (*Victoria, error) {
 		client: client,
 	}
 
+	// Cache the ingestion URL once instead of rebuilding it for every request.
+	v.url = v.requestURL()
+
+	// Start the background sender only when batching was requested. With batching
+	// disabled nothing changes: Handle sends synchronously and Close is a no-op.
+	if config.BatchSize > 0 {
+		if config.BatchWait <= 0 {
+			config.BatchWait = time.Second
+		}
+		v.batchCh = make(chan map[string]interface{}, config.BatchSize*4)
+		v.done = make(chan struct{})
+		v.wg.Add(1)
+		go v.batchWorker()
+	}
+
 	// Verify connectivity in development mode
 	if config.DevMode {
 		if err := v.Ping(); err != nil {
@@ -222,6 +263,20 @@ func New(opts ...Option) (*Victoria, error) {
 	}
 
 	return v, nil
+}
+
+// ErrBufferFull is returned by Handle when the batching queue is full. Entries
+// are rejected rather than blocking the caller or growing memory without bound.
+var ErrBufferFull = errors.New("victoria: log buffer full")
+
+// ErrClosed is returned by Handle when the handler has been closed.
+var ErrClosed = errors.New("victoria: handler closed")
+
+// report forwards an asynchronous error to the configured handler, if any.
+func (v *Victoria) report(err error) {
+	if err != nil && v.config != nil && v.config.OnError != nil {
+		v.config.OnError(err)
+	}
 }
 
 // Handle implements the lx.Handler interface for processing log entries.
@@ -240,7 +295,73 @@ func New(opts ...Option) (*Victoria, error) {
 // - If batching is disabled: Sends entry immediately to VictoriaLogs
 // - If buffer is full: Falls back to immediate sending after timeout
 func (v *Victoria) Handle(e *lx.Entry) error {
-	return v.sendSingle(e)
+	// Batching disabled (default): unchanged synchronous behaviour.
+	if v.batchCh == nil {
+		return v.sendSingle(e)
+	}
+
+	line := v.buildLine(e)
+	// Handle never blocks on the network while batching: if the queue is full
+	// (or the handler has been closed) the entry is rejected instead, so a slow
+	// VictoriaLogs endpoint cannot stall the caller.
+	select {
+	case <-v.done:
+		v.report(ErrClosed)
+		return ErrClosed
+	default:
+	}
+	select {
+	case v.batchCh <- line:
+		return nil
+	default:
+		v.report(ErrBufferFull)
+		return ErrBufferFull
+	}
+}
+
+// batchWorker drains the queue into batches and sends them.
+func (v *Victoria) batchWorker() {
+	defer v.wg.Done()
+
+	ticker := time.NewTicker(v.config.BatchWait)
+	defer ticker.Stop()
+
+	batch := make([]map[string]interface{}, 0, v.config.BatchSize)
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		v.report(v.sendBatchWithRetry(batch))
+		// Reset length, keep capacity.
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case line := <-v.batchCh:
+			batch = append(batch, line)
+			if len(batch) >= v.config.BatchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		case <-v.done:
+			// Drain whatever is queued, then flush and exit.
+			for {
+				select {
+				case line := <-v.batchCh:
+					batch = append(batch, line)
+					if len(batch) >= v.config.BatchSize {
+						flush()
+					}
+				default:
+					flush()
+					return
+				}
+			}
+		}
+	}
 }
 
 // sendSingle sends a single log entry immediately to VictoriaLogs.
@@ -330,7 +451,7 @@ func (v *Victoria) sendWithRetry(line map[string]interface{}) error {
 		lastErr = err
 
 		// Don't retry on 4xx errors (client errors - configuration issues)
-		if strings.Contains(err.Error(), "rejected: 4") || strings.Contains(err.Error(), "status 4") {
+		if isClientError(err) {
 			break
 		}
 	}
@@ -376,18 +497,37 @@ func (v *Victoria) send(line map[string]interface{}) error {
 	}
 
 	// Append newline for NDJSON format
-	data := append(b, '\n')
+	return v.post(append(b, '\n'))
+}
 
-	// Build URL with VictoriaLogs query parameters
+// requestURL returns the ingestion URL including the VictoriaLogs query
+// parameters. It is computed once at construction and cached in v.url.
+func (v *Victoria) requestURL() string {
+	if v.url != "" {
+		return v.url
+	}
 	streamFields := strings.Join(v.config.StreamKeys, ",")
-	victoriaURL := fmt.Sprintf("%s?_msg_field=msg&_time_field=ts&_stream_fields=%s",
+	return fmt.Sprintf("%s?_msg_field=msg&_time_field=ts&_stream_fields=%s",
 		v.endpointURL(), streamFields)
+}
 
+// statusError reports a non-2xx response from VictoriaLogs.
+type statusError struct {
+	code int
+	body string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("VictoriaLogs rejected (status %d): %s", e.code, e.body)
+}
+
+// post sends an already encoded NDJSON payload.
+func (v *Victoria) post(data []byte) error {
 	// Create request with timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), v.config.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", victoriaURL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", v.requestURL(), bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("create VictoriaLogs request: %w", err)
 	}
@@ -403,10 +543,69 @@ func (v *Victoria) send(line map[string]interface{}) error {
 	// Check response status
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("VictoriaLogs rejected (status %d): %s", resp.StatusCode, string(body))
+		return &statusError{code: resp.StatusCode, body: string(body)}
 	}
 
 	return nil
+}
+
+// encodeBatch encodes log lines as a single NDJSON payload (one JSON object per
+// line), which VictoriaLogs accepts in a single request.
+func encodeBatch(lines []map[string]interface{}) ([]byte, error) {
+	buf := make([]byte, 0, len(lines)*128)
+	for _, line := range lines {
+		b, err := json.Marshal(line)
+		if err != nil {
+			return nil, fmt.Errorf("marshal VictoriaLogs line: %w", err)
+		}
+		buf = append(buf, b...)
+		buf = append(buf, '\n')
+	}
+	return buf, nil
+}
+
+// sendBatchWithRetry sends several log lines in one request, retrying with the
+// same backoff policy as sendWithRetry. It is only used by the batch worker, so
+// retries never block a logging caller.
+func (v *Victoria) sendBatchWithRetry(lines []map[string]interface{}) error {
+	payload, err := encodeBatch(lines)
+	if err != nil {
+		return err
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= v.config.RetryCount; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 0ms, 100ms, 400ms, 900ms...
+			backoff := time.Duration(attempt*attempt*100) * time.Millisecond
+			time.Sleep(backoff)
+		}
+		err := v.post(payload)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if isClientError(err) {
+			break
+		}
+	}
+	return lastErr
+}
+
+// isClientError reports whether err is a 4xx response (a configuration issue
+// that will not be fixed by retrying).
+func isClientError(err error) bool {
+	var se *statusError
+	if errors.As(err, &se) {
+		return se.code >= 400 && se.code < 500
+	}
+	// Fallback for wrapped/opaque errors.
+	return strings.Contains(err.Error(), "rejected (status 4") ||
+		strings.Contains(err.Error(), "rejected: 4") ||
+		strings.Contains(err.Error(), "status 4")
 }
 
 // Ping sends a test request to verify VictoriaLogs connectivity.
@@ -438,6 +637,12 @@ func (v *Victoria) Ping() error {
 // Returns:
 // - error: Always returns nil (errors are logged but not returned)
 func (v *Victoria) Close() error {
+	v.closeOnce.Do(func() {
+		if v.done != nil {
+			close(v.done)
+			v.wg.Wait()
+		}
+	})
 	return nil
 }
 
