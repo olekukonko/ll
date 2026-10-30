@@ -1,38 +1,15 @@
 package ll
 
-import (
-	"sync"
-)
-
-// conditionalPool pools Conditional instances to reduce allocations.
-var conditionalPool = sync.Pool{
-	New: func() any {
-		return &Conditional{}
-	},
-}
-
 // Conditional enables conditional logging based on a boolean condition.
 // It wraps a logger with a condition that determines whether logging operations are executed,
 // optimizing performance by skipping expensive operations (e.g., field computation, message formatting)
 // when the condition is false. The struct supports fluent chaining for adding fields and logging.
+//
+// A Conditional is intended for a single fluent chain (e.g. logger.If(ok).Info("x")).
+// It is not safe to retain or reuse the value returned by If after the chain terminates.
 type Conditional struct {
 	logger    *Logger // Associated logger instance for logging operations
 	condition bool    // Whether logging is allowed (true to log, false to skip)
-}
-
-// getConditional retrieves a Conditional from the pool or creates a new one.
-func getConditional(logger *Logger, condition bool) *Conditional {
-	c := conditionalPool.Get().(*Conditional)
-	c.logger = logger
-	c.condition = condition
-	return c
-}
-
-// putConditional returns a Conditional to the pool for reuse.
-func putConditional(c *Conditional) {
-	c.logger = nil
-	c.condition = false
-	conditionalPool.Put(c)
 }
 
 // If creates a conditional logger that logs only if the condition is true.
@@ -45,7 +22,9 @@ func putConditional(c *Conditional) {
 //	logger.If(true).Info("Logged")   // Output: [app] INFO: Logged
 //	logger.If(false).Info("Ignored") // No output
 func (l *Logger) If(condition bool) *Conditional {
-	return getConditional(l, condition)
+	// Deliberately not pooled: a pooled instance would be invalidated as soon as the
+	// chain terminates, silently corrupting code that reuses the value.
+	return &Conditional{logger: l, condition: condition}
 }
 
 // IfAny creates a conditional logger that logs only if at least one condition is true.

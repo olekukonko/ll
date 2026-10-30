@@ -52,6 +52,36 @@ func putFieldBuilder(fb *FieldBuilder) {
 	fieldBuilderPool.Put(fb)
 }
 
+// Log logs a message at an arbitrary level with the builder's fields.
+// It is the dynamic-level counterpart of Info/Warn/Error.
+// Example:
+//
+//	logger.Fields("user", "alice").Log(lx.LevelWarn, "quota", "low")
+func (fb *FieldBuilder) Log(level lx.LevelType, args ...any) {
+	if fb.logger == nil {
+		return
+	}
+	if !fb.logger.shouldLog(level) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(level, lx.ClassText, cat.Space(args...), fb.fields, false)
+	putFieldBuilder(fb)
+}
+
+// Logf logs a formatted message at an arbitrary level with the builder's fields.
+func (fb *FieldBuilder) Logf(level lx.LevelType, format string, args ...any) {
+	if fb.logger == nil {
+		return
+	}
+	if !fb.logger.shouldLog(level) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(level, lx.ClassText, fmt.Sprintf(format, args...), fb.fields, false)
+	putFieldBuilder(fb)
+}
+
 // Logger creates a new logger with the builder's fields embedded in its context.
 // It clones the parent logger and copies the builder's fields into the new logger's context,
 // enabling persistent field inclusion in subsequent logs. This method supports fluent chaining
@@ -66,11 +96,16 @@ func (fb *FieldBuilder) Logger() *Logger {
 	if fb.logger == nil {
 		return nil
 	}
-	// Clone the parent logger to preserve its configuration
+	// Clone the parent logger to preserve its configuration (including the
+	// parent's own context fields, which are shared copy-on-write).
 	newLogger := fb.logger.Clone()
-	// Copy builder's fields into the new logger's context (optimized)
+	// Append the builder's fields on top of the inherited context.
 	if len(fb.fields) > 0 {
-		newLogger.context = append(lx.Fields(nil), fb.fields...)
+		ctx := make(lx.Fields, 0, len(newLogger.context)+len(fb.fields))
+		ctx = append(ctx, newLogger.context...)
+		ctx = append(ctx, fb.fields...)
+		newLogger.context = ctx
+		newLogger.publish() // refresh the hot-path snapshot
 	}
 	return newLogger
 }
@@ -86,7 +121,12 @@ func (fb *FieldBuilder) Info(args ...any) {
 	if fb.logger == nil {
 		return
 	}
-	fb.logger.log(lx.LevelInfo, lx.ClassText, cat.Space(args...), fb.fields, false)
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelInfo) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(lx.LevelInfo, lx.ClassText, cat.Space(args...), fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -101,8 +141,13 @@ func (fb *FieldBuilder) Infof(format string, args ...any) {
 	if fb.logger == nil {
 		return
 	}
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelInfo) {
+		putFieldBuilder(fb)
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	fb.logger.log(lx.LevelInfo, lx.ClassText, msg, fb.fields, false)
+	fb.logger.logChecked(lx.LevelInfo, lx.ClassText, msg, fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -117,7 +162,12 @@ func (fb *FieldBuilder) Debug(args ...any) {
 	if fb.logger == nil {
 		return
 	}
-	fb.logger.log(lx.LevelDebug, lx.ClassText, cat.Space(args...), fb.fields, false)
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelDebug) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(lx.LevelDebug, lx.ClassText, cat.Space(args...), fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -132,8 +182,13 @@ func (fb *FieldBuilder) Debugf(format string, args ...any) {
 	if fb.logger == nil {
 		return
 	}
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelDebug) {
+		putFieldBuilder(fb)
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	fb.logger.log(lx.LevelDebug, lx.ClassText, msg, fb.fields, false)
+	fb.logger.logChecked(lx.LevelDebug, lx.ClassText, msg, fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -148,7 +203,12 @@ func (fb *FieldBuilder) Warn(args ...any) {
 	if fb.logger == nil {
 		return
 	}
-	fb.logger.log(lx.LevelWarn, lx.ClassText, cat.Space(args...), fb.fields, false)
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelWarn) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(lx.LevelWarn, lx.ClassText, cat.Space(args...), fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -163,8 +223,13 @@ func (fb *FieldBuilder) Warnf(format string, args ...any) {
 	if fb.logger == nil {
 		return
 	}
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelWarn) {
+		putFieldBuilder(fb)
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	fb.logger.log(lx.LevelWarn, lx.ClassText, msg, fb.fields, false)
+	fb.logger.logChecked(lx.LevelWarn, lx.ClassText, msg, fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -179,7 +244,12 @@ func (fb *FieldBuilder) Error(args ...any) {
 	if fb.logger == nil {
 		return
 	}
-	fb.logger.log(lx.LevelError, lx.ClassText, cat.Space(args...), fb.fields, false)
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelError) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(lx.LevelError, lx.ClassText, cat.Space(args...), fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -194,8 +264,13 @@ func (fb *FieldBuilder) Errorf(format string, args ...any) {
 	if fb.logger == nil {
 		return
 	}
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelError) {
+		putFieldBuilder(fb)
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	fb.logger.log(lx.LevelError, lx.ClassText, msg, fb.fields, false)
+	fb.logger.logChecked(lx.LevelError, lx.ClassText, msg, fb.fields, false)
 	putFieldBuilder(fb)
 }
 
@@ -210,7 +285,12 @@ func (fb *FieldBuilder) Stack(args ...any) {
 	if fb.logger == nil {
 		return
 	}
-	fb.logger.log(lx.LevelError, lx.ClassText, cat.Space(args...), fb.fields, true)
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelError) {
+		putFieldBuilder(fb)
+		return
+	}
+	fb.logger.logChecked(lx.LevelError, lx.ClassText, cat.Space(args...), fb.fields, true)
 	putFieldBuilder(fb)
 }
 
@@ -225,8 +305,13 @@ func (fb *FieldBuilder) Stackf(format string, args ...any) {
 	if fb.logger == nil {
 		return
 	}
+	// Check before building the message so disabled logs cost nothing.
+	if !fb.logger.shouldLog(lx.LevelError) {
+		putFieldBuilder(fb)
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
-	fb.logger.log(lx.LevelError, lx.ClassText, msg, fb.fields, true)
+	fb.logger.logChecked(lx.LevelError, lx.ClassText, msg, fb.fields, true)
 	putFieldBuilder(fb)
 }
 
@@ -336,7 +421,9 @@ func (fb *FieldBuilder) Err(errs ...error) *FieldBuilder {
 		} else {
 			fb.fields = append(fb.fields, lx.Field{Key: "error", Value: nonNilErrors})
 		}
-		fb.logger.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
+		if fb.logger.shouldLog(lx.LevelError) {
+			fb.logger.logChecked(lx.LevelError, lx.ClassText, builder.String(), nil, false)
+		}
 	}
 	return fb
 }
@@ -349,7 +436,12 @@ func (fb *FieldBuilder) Err(errs ...error) *FieldBuilder {
 //	logger := New("app").Enable()
 //	logger.Fields("k1", "v1").Merge("k2", "v2").Info("Action") // Output: [app] INFO: Action [k1=v1 k2=v2]
 func (fb *FieldBuilder) Merge(pairs ...any) *FieldBuilder {
-	// Merge can work even with nil logger since it just manipulates fields
+	// A discard builder (nil logger, produced by a false Conditional) has nothing
+	// to accumulate into: mutating it is pointless and it must stay immutable so
+	// it can be shared.
+	if fb.logger == nil {
+		return fb
+	}
 	for i := 0; i < len(pairs)-1; i += 2 {
 		if key, ok := pairs[i].(string); ok {
 			fb.fields = append(fb.fields, lx.Field{Key: key, Value: pairs[i+1]})

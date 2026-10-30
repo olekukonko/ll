@@ -1,6 +1,7 @@
 package ll
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,12 +28,7 @@ var (
 	}
 
 	entryPool = sync.Pool{
-		New: func() any {
-			return &lx.Entry{
-				Fields: make(lx.Fields, 0, 4),
-				Stack:  nil,
-			}
-		},
+		New: func() any { return &lx.Entry{} },
 	}
 
 	fieldsSlicePool = sync.Pool{
@@ -41,6 +38,23 @@ var (
 		},
 	}
 )
+
+// loggerConfig is an immutable snapshot of everything the emit path needs.
+// Setters mutate Logger fields under l.mu and then publish a fresh snapshot, so
+// the hot path can read the configuration with a single atomic load instead of
+// taking the read lock on every log call.
+type loggerConfig struct {
+	handler    lx.Handler
+	prefix     string
+	indent     int
+	context    lx.Fields
+	style      lx.StyleType
+	path       string
+	separator  string
+	middleware []Middleware
+	stackSize  int
+	caller     bool
+}
 
 // Logger manages logging configuration and behavior, encapsulating state such as enablement,
 // log level, namespaces, context fields, output style, handler, middleware, and formatting.
@@ -64,7 +78,44 @@ type Logger struct {
 	entries         atomic.Int64  // Tracks total log entries sent to handler
 	fatalExits      bool
 	fatalStack      bool
+	caller          bool                                 // capture caller location on every entry
+	ordered         atomic.Bool                          // severity-ordered level filtering (opt-in)
+	ctxFields       func(ctx context.Context) []lx.Field // derives fields from a context.Context
 	labels          atomic.Pointer[[]string]
+	cfg             atomic.Pointer[loggerConfig] // published read-only view for the hot path
+}
+
+// publish snapshots the mutable configuration into an immutable view that the
+// logging hot path reads without locking. Callers must hold l.mu for writing (or
+// own the logger exclusively, e.g. during construction).
+func (l *Logger) publish() {
+	l.cfg.Store(&loggerConfig{
+		handler:    l.handler,
+		prefix:     l.prefix,
+		indent:     l.indent,
+		context:    l.context,
+		style:      l.style,
+		path:       l.currentPath,
+		separator:  l.separator,
+		middleware: l.middleware,
+		stackSize:  l.stackBufferSize,
+		caller:     l.caller,
+	})
+}
+
+// config returns the current configuration snapshot, creating one on demand for
+// hand-built Logger values (e.g. &Logger{} in tests).
+func (l *Logger) config() *loggerConfig {
+	if c := l.cfg.Load(); c != nil {
+		return c
+	}
+	l.mu.RLock()
+	l.publish()
+	l.mu.RUnlock()
+	if c := l.cfg.Load(); c != nil {
+		return c
+	}
+	return &loggerConfig{}
 }
 
 // New creates a new Logger with the given namespace and optional configurations.
@@ -94,12 +145,17 @@ func New(namespace string, opts ...Option) *Logger {
 	for _, opt := range opts {
 		opt(logger)
 	}
+	logger.publish()
 	return logger
 }
 
 // Apply applies one or more functional options to the default/global logger.
 // Useful for late configuration (e.g., after migration, attach VictoriaLogs handler,
 // set level, add middleware, etc.) without changing existing New() calls.
+//
+// Each option is responsible for its own synchronization, so Apply deliberately
+// does not hold the logger mutex while running the options (options such as
+// WithLevel call Logger.Level, which takes the write lock itself).
 //
 // Example:
 //
@@ -112,13 +168,14 @@ func New(namespace string, opts ...Option) *Logger {
 //
 // Returns the default logger for chaining (if needed).
 func (l *Logger) Apply(opts ...Option) *Logger {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	for _, opt := range opts {
 		if opt != nil {
 			opt(l)
 		}
 	}
+	l.mu.Lock()
+	l.publish()
+	l.mu.Unlock()
 	return l
 }
 
@@ -147,6 +204,7 @@ func (l *Logger) AddContext(pairs ...any) *Logger {
 			l.context = append(l.context, lx.Field{Key: key, Value: pairs[i+1]})
 		}
 	}
+	l.publish()
 	return l
 }
 
@@ -187,12 +245,14 @@ func (l *Logger) Clear() *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.middleware = nil
+	l.publish()
 	return l
 }
 
-// Clone creates a new logger with the same configuration and namespace as the parent,
-// but with a fresh context map to allow independent field additions. It is thread-safe
-// using a read lock.
+// Clone creates a new logger with the same configuration and namespace as the parent.
+// The clone shares the parent's context fields (copy-on-write: adding fields to either
+// logger never affects the other) and its own atomic state for the identity/enabled
+// flags. It is thread-safe using a read lock.
 // Example:
 //
 //	logger := New("app").Enable().Context(map[string]interface{}{"k": "v"})
@@ -201,22 +261,28 @@ func (l *Logger) Clear() *Logger {
 func (l *Logger) Clone() *Logger {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return &Logger{
-		enabled:         l.enabled,         // Copy enablement state
-		level:           l.level,           // Copy log level
-		atomicLevel:     l.atomicLevel,     // Copy atomic level
-		namespaces:      l.namespaces,      // Share namespace store
-		currentPath:     l.currentPath,     // Copy namespace path
-		context:         nil,               // Fresh context map (nil saves allocation, handled by AddContext)
-		style:           l.style,           // Copy namespace style
-		handler:         l.handler,         // Copy output handler
-		middleware:      l.middleware,      // Copy middleware chain
-		prefix:          l.prefix,          // Copy message prefix
-		indent:          l.indent,          // Copy indentation level
-		stackBufferSize: l.stackBufferSize, // Copy stack trace buffer size
-		separator:       l.separator,       // Default separator ("/")
-		suspend:         l.suspend,
+	child := &Logger{
+		level:           l.level,                                   // Copy log level
+		atomicLevel:     l.atomicLevel,                             // Copy atomic level
+		namespaces:      l.namespaces,                              // Share namespace store
+		currentPath:     l.currentPath,                             // Copy namespace path
+		context:         l.context[:len(l.context):len(l.context)], // Share read-only, copy-on-append
+		style:           l.style,                                   // Copy namespace style
+		handler:         l.handler,                                 // Copy output handler
+		middleware:      l.middleware,                              // Copy middleware chain
+		prefix:          l.prefix,                                  // Copy message prefix
+		indent:          l.indent,                                  // Copy indentation level
+		stackBufferSize: l.stackBufferSize,                         // Copy stack trace buffer size
+		separator:       l.separator,                               // Default separator ("/")
+		fatalExits:      l.fatalExits,                              // Preserve Fatal() exit behaviour
+		fatalStack:      l.fatalStack,                              // Preserve Fatal() stack behaviour
 	}
+	// Atomic fields must be copied by value assignment, never by struct copy (go vet).
+	child.enabled.Store(l.enabled.Load())
+	child.suspend.Store(l.suspend.Load())
+	child.labels.Store(l.labels.Load())
+	child.publish()
+	return child
 }
 
 // Context creates a new logger with additional contextual fields, preserving existing
@@ -232,7 +298,6 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 	defer l.mu.Unlock()
 	// Create a new logger with inherited configuration
 	newLogger := &Logger{
-		enabled:         l.enabled,
 		level:           l.level,
 		atomicLevel:     l.atomicLevel,
 		namespaces:      l.namespaces,
@@ -245,16 +310,20 @@ func (l *Logger) Context(fields map[string]interface{}) *Logger {
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
 		separator:       l.separator,
-		suspend:         l.suspend,
 		fatalExits:      l.fatalExits,
 		fatalStack:      l.fatalStack,
 	}
+	// Atomic fields must be copied by value assignment, never by struct copy (go vet).
+	newLogger.enabled.Store(l.enabled.Load())
+	newLogger.suspend.Store(l.suspend.Load())
+	newLogger.labels.Store(l.labels.Load())
 	// Copy parent's context fields (in order)
 	newLogger.context = append(newLogger.context, l.context...)
 	// Add new fields from map
 	for k, v := range fields {
 		newLogger.context = append(newLogger.context, lx.Field{Key: k, Value: v})
 	}
+	newLogger.publish()
 	return newLogger
 }
 
@@ -272,7 +341,7 @@ func (l *Logger) Debug(args ...any) {
 	if !l.shouldLog(lx.LevelDebug) {
 		return
 	}
-	l.log(lx.LevelDebug, lx.ClassText, cat.Space(args...), nil, false)
+	l.logChecked(lx.LevelDebug, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Debugf logs a formatted message at Debug level, delegating to Debug. It is thread-safe.
@@ -354,33 +423,37 @@ func (l *Logger) Dump(values ...interface{}) {
 		}
 		// Generate hex/ASCII dump
 		n := len(by)
-		rowcount := 0
-		stop := (n / 8) * 8
-		k := 0
 		s := strings.Builder{}
-		// Process 8-byte rows
-		for i := 0; i <= stop; i += 8 {
-			k++
-			if i+8 < n {
-				rowcount = 8
-			} else {
-				rowcount = min(k*8, n) % 8
+		s.Grow((n/8 + 1) * 40)
+		// Process 8-byte rows. A row is emitted only while there is data left, so
+		// lengths that are an exact multiple of 8 do not produce phantom empty rows.
+		for i := 0; i < n; i += 8 {
+			end := i + 8
+			if end > n {
+				end = n
 			}
+			rowcount := end - i
 			// Write position and hex prefix
-			s.WriteString(fmt.Sprintf("pos %02d  hex:  ", i))
+			fmt.Fprintf(&s, "pos %02d  hex:  ", i)
 			// Write hex values
-			for j := 0; j < rowcount; j++ {
-				s.WriteString(fmt.Sprintf("%02x  ", by[i+j]))
+			for j := i; j < end; j++ {
+				fmt.Fprintf(&s, "%02x  ", by[j])
 			}
 			// Pad with spaces for alignment
 			for j := rowcount; j < 8; j++ {
-				s.WriteString(fmt.Sprintf("    "))
+				s.WriteString("    ")
 			}
 			// Write ASCII representation
-			s.WriteString(fmt.Sprintf("  '%s'\n", viewString(by[i:(i+rowcount)])))
+			s.WriteString("  '")
+			s.WriteString(viewString(by[i:end]))
+			s.WriteString("'\n")
+		}
+		// Nothing to dump (e.g. an empty byte slice): skip the entry entirely.
+		if n == 0 {
+			continue
 		}
 		// Log the hex/ASCII dump
-		l.log(lx.LevelNone, lx.ClassDump, s.String(), nil, false)
+		l.logChecked(lx.LevelNone, lx.ClassDump, s.String(), nil, false)
 	}
 }
 
@@ -422,7 +495,7 @@ func (l *Logger) output(skip int, values ...interface{}) {
 				"error": err.Error(),
 			}, "  ", "  ")
 		}
-		l.log(lx.LevelInfo, lx.ClassOutput, header+string(b), nil, false)
+		l.logChecked(lx.LevelInfo, lx.ClassOutput, header+string(b), nil, false)
 	}
 }
 
@@ -471,16 +544,19 @@ func (l *Logger) Enabled() bool {
 	return l.enabled.Load() == lx.Active
 }
 
-// Err adds one or more errors to the loggerâ   s context and logs them at Error level.
+// Err adds one or more errors to the logger's context and logs them at Error level.
 // Non-nil errors are stored in the "error" context field (single error or slice) and
-// logged as a concatenated string (e.g., "failed 1; failed 2"). It is thread-safe and
-// returns the logger for chaining.
+// logged as a concatenated string (e.g., "failed 1; failed 2"). It is thread-safe.
+//
+// The errors become part of the logger's persistent context, so they are included
+// in every subsequent log entry from this logger.
 // Example:
 //
 //	logger := New("app").Enable()
 //	err1 := errors.New("failed 1")
 //	err2 := errors.New("failed 2")
-//	logger.Err(err1, err2).Info("Error occurred")
+//	logger.Err(err1, err2)
+//	logger.Info("Error occurred")
 //	// Output: [app] ERROR: failed 1; failed 2
 //	//         [app] INFO: Error occurred [error=[failed 1 failed 2]]
 func (l *Logger) Err(errs ...error) {
@@ -492,12 +568,7 @@ func (l *Logger) Err(errs ...error) {
 	if !l.shouldLog(lx.LevelError) {
 		return
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	// Initialize context slice if nil
-	if l.context == nil {
-		l.context = make(lx.Fields, 0, 4)
-	}
+
 	// Collect non-nil errors and build log message
 	var nonNilErrors []error
 	var builder strings.Builder
@@ -512,17 +583,28 @@ func (l *Logger) Err(errs ...error) {
 			count++
 		}
 	}
-	if count > 0 {
-		if count == 1 {
-			// Store single error directly
-			l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors[0]})
-		} else {
-			// Store slice of errors
-			l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors})
-		}
-		// Log concatenated error messages
-		l.log(lx.LevelError, lx.ClassText, builder.String(), nil, false)
+	if count == 0 {
+		return
 	}
+
+	// Mutate the persistent context under the write lock, then release it before
+	// logging: emit takes the read lock and sync.RWMutex is not reentrant.
+	l.mu.Lock()
+	if l.context == nil {
+		l.context = make(lx.Fields, 0, 4)
+	}
+	if count == 1 {
+		// Store single error directly
+		l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors[0]})
+	} else {
+		// Store slice of errors
+		l.context = append(l.context, lx.Field{Key: "error", Value: nonNilErrors})
+	}
+	l.publish()
+	l.mu.Unlock()
+
+	// Log concatenated error messages
+	l.logChecked(lx.LevelError, lx.ClassText, builder.String(), nil, false)
 }
 
 // Error logs a message at Error level, formatting it and delegating to the internal
@@ -539,7 +621,7 @@ func (l *Logger) Error(args ...any) {
 	if !l.shouldLog(lx.LevelError) {
 		return
 	}
-	l.log(lx.LevelError, lx.ClassText, cat.Space(args...), nil, false)
+	l.logChecked(lx.LevelError, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Errorf logs a formatted message at Error level, delegating to Error. It is thread-safe.
@@ -700,6 +782,23 @@ func (l *Logger) GetLevel() lx.LevelType {
 	return l.level
 }
 
+// FatalExits reports whether Fatal/Fatalf terminate the process.
+// Exiting is opt-in via WithFatalExits(true); by default Fatal only logs
+// (matching the library's "never kill the host application by surprise" stance).
+func (l *Logger) FatalExits() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.fatalExits
+}
+
+// FatalStack reports whether Fatal entries capture a stack trace.
+// It is configured with WithFatalStack(true).
+func (l *Logger) FatalStack() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.fatalStack
+}
+
 // GetPath returns the logger's current namespace path. It is thread-safe using a read lock.
 // Example:
 //
@@ -748,19 +847,189 @@ func (l *Logger) Handler(handler lx.Handler) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.handler = handler
+	l.publish()
 	return l
 }
 
-// Indent sets the indentation level for log messages, adding two spaces per level. It is
-// thread-safe using a write lock and returns the logger for chaining.
+// Caller enables or disables caller reporting ("file.go:42") on every entry.
+// Capturing the caller walks the stack, so it is off by default.
 // Example:
 //
-//	logger := New("app").Enable().Indent(2)
-//	logger.Info("Indented") // Output: [app] INFO:     Indented
+//	logger := New("app", WithCaller(true))
+//	logger.Info("started") // Output: [main.go:12] [app] INFO: started
+func (l *Logger) Caller(enabled bool) *Logger {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.caller = enabled
+	l.publish()
+	return l
+}
+
+// OrderedLevels enables severity-based level filtering (see WithOrderedLevels).
+func (l *Logger) OrderedLevels(enabled bool) *Logger {
+	l.ordered.Store(enabled)
+	return l
+}
+
+// Log emits a message at an arbitrary level. It is the dynamic-level entry point
+// used by adapters and by code that chooses a level at runtime.
+// Example:
+//
+//	logger.Log(lx.LevelWarn, "disk", "almost full")
+func (l *Logger) Log(level lx.LevelType, args ...any) {
+	if l.suspend.Load() {
+		return
+	}
+	if !l.shouldLog(level) {
+		return
+	}
+	l.logChecked(level, lx.ClassText, cat.Space(args...), nil, false)
+}
+
+// Logf emits a formatted message at an arbitrary level.
+// Example:
+//
+//	logger.Logf(lx.LevelError, "%d requests failed", n)
+func (l *Logger) Logf(level lx.LevelType, format string, args ...any) {
+	if l.suspend.Load() {
+		return
+	}
+	if !l.shouldLog(level) {
+		return
+	}
+	l.logChecked(level, lx.ClassText, fmt.Sprintf(format, args...), nil, false)
+}
+
+// Ctx derives a logger that carries the fields produced by the logger's context
+// extractor (see WithContextExtractor) for the given context. The parent logger
+// is never mutated; the returned logger inherits its configuration and context.
+//
+// Example:
+//
+//	logger = logger.Ctx(r.Context())
+//	logger.Info("handled") // includes trace_id/request_id if configured
+func (l *Logger) Ctx(ctx context.Context) *Logger {
+	l.mu.RLock()
+	extract := l.ctxFields
+	l.mu.RUnlock()
+	if extract == nil || ctx == nil {
+		return l
+	}
+	ctxFields := extract(ctx)
+	if len(ctxFields) == 0 {
+		return l
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	child := &Logger{
+		level:           l.level,
+		atomicLevel:     l.atomicLevel,
+		namespaces:      l.namespaces,
+		currentPath:     l.currentPath,
+		context:         make(lx.Fields, 0, len(l.context)+len(ctxFields)),
+		style:           l.style,
+		handler:         l.handler,
+		middleware:      l.middleware,
+		prefix:          l.prefix,
+		indent:          l.indent,
+		stackBufferSize: l.stackBufferSize,
+		separator:       l.separator,
+		fatalExits:      l.fatalExits,
+		fatalStack:      l.fatalStack,
+		caller:          l.caller,
+		ctxFields:       extract,
+	}
+	child.enabled.Store(l.enabled.Load())
+	child.suspend.Store(l.suspend.Load())
+	child.labels.Store(l.labels.Load())
+	child.ordered.Store(l.ordered.Load())
+	child.context = append(child.context, l.context...)
+	child.context = append(child.context, ctxFields...)
+	child.publish()
+	return child
+}
+
+// Flush flushes any buffered handler in the chain (e.g. lh.Buffered).
+// It walks fan-out handlers such as lh.MultiHandler.
+func (l *Logger) Flush() error {
+	return flushHandler(l.config().handler)
+}
+
+// Close flushes and closes every handler in the chain that supports it
+// (e.g. lh.Buffered, lh.Rotating, victoria). Handlers are released resources
+// in a best-effort manner; the first error is returned.
+func (l *Logger) Close() error {
+	h := l.config().handler
+	if err := flushHandler(h); err != nil {
+		return err
+	}
+	return closeHandler(h)
+}
+
+// flushHandler flushes h, recursing into fan-out handlers.
+func flushHandler(h lx.Handler) error {
+	if h == nil {
+		return nil
+	}
+	var err error
+	if w, ok := h.(lx.Walker); ok {
+		w.Walk(func(child lx.Handler) {
+			if e := flushHandler(child); e != nil && err == nil {
+				err = e
+			}
+		})
+		return err
+	}
+	if f, ok := h.(lx.Flusher); ok {
+		f.Flush()
+	}
+	return err
+}
+
+// closeHandler closes h, recursing into fan-out handlers.
+func closeHandler(h lx.Handler) error {
+	if h == nil {
+		return nil
+	}
+	var err error
+	if w, ok := h.(lx.Walker); ok {
+		w.Walk(func(child lx.Handler) {
+			if e := closeHandler(child); e != nil && err == nil {
+				err = e
+			}
+		})
+		return err
+	}
+	if c, ok := h.(lx.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+// NamespaceLevel sets a minimum severity for a namespace path and its descendants,
+// e.g. NamespaceLevel("db", lx.LevelWarn) keeps only Warn/Error/Fatal from that
+// subtree. Unlike Logger.Level it always uses severity ordering (see
+// lx.LevelType.Severity). It composes with NamespaceEnable/NamespaceDisable: a
+// namespace must be enabled (or the logger enabled) and the entry must meet the
+// namespace level.
+// Example:
+//
+//	logger.NamespaceLevel("app/db", lx.LevelWarn) // quiet the db namespace
+func (l *Logger) NamespaceLevel(relativePath string, level lx.LevelType) *Logger {
+	l.mu.RLock()
+	fullPath := l.joinPath(l.currentPath, relativePath)
+	l.mu.RUnlock()
+	l.namespaces.SetLevel(fullPath, level)
+	return l
+}
+
+// Line adds vertical spacing (newlines) to the log output, defaulting to 1 if no arguments
 func (l *Logger) Indent(depth int) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.indent = depth
+	l.publish()
 	return l
 }
 
@@ -777,7 +1046,7 @@ func (l *Logger) Info(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-	l.log(lx.LevelInfo, lx.ClassText, cat.Space(args...), nil, false)
+	l.logChecked(lx.LevelInfo, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Infof logs a formatted message at Info level, delegating to Info. It is thread-safe.
@@ -889,7 +1158,7 @@ func (l *Logger) mark(skip int, names ...string) {
 	// Get caller information (file, line)
 	_, file, line, ok := runtime.Caller(skip)
 	if !ok {
-		l.log(lx.LevelError, lx.ClassText, "Mark: Unable to parse runtime caller", nil, false)
+		l.logChecked(lx.LevelError, lx.ClassText, "Mark: Unable to parse runtime caller", nil, false)
 		return
 	}
 	// Extract just the filename (without full path)
@@ -903,12 +1172,12 @@ func (l *Logger) mark(skip int, names ...string) {
 	}
 	// Format as [filename:line]
 	out := fmt.Sprintf("[*%s*]: [%s:%d]\n", name, shortFile, line)
-	l.log(lx.LevelInfo, lx.ClassRaw, out, nil, false)
+	l.logChecked(lx.LevelInfo, lx.ClassRaw, out, nil, false)
 }
 
 // Namespace creates a child logger with a sub-namespace appended to the current path,
-// inheriting the parentâ   s configuration but with an independent context. It is thread-safe
-// using a read lock.
+// inheriting the parent configuration and context fields (copy-on-write: fields added
+// to either logger never leak into the other). It is thread-safe using a read lock.
 // Example:
 //
 //	parent := New("parent").Enable()
@@ -926,13 +1195,12 @@ func (l *Logger) Namespace(name string) *Logger {
 		fullPath = l.currentPath + l.separator + name
 	}
 	// Create child logger with inherited configuration
-	return &Logger{
-		enabled:         l.enabled,
+	child := &Logger{
 		level:           l.level,
 		atomicLevel:     l.atomicLevel,
 		namespaces:      l.namespaces,
 		currentPath:     fullPath,
-		context:         nil, // Fresh context map (nil saves allocation)
+		context:         l.context[:len(l.context):len(l.context)], // inherited, copy-on-append
 		style:           l.style,
 		handler:         l.handler,
 		middleware:      l.middleware,
@@ -940,8 +1208,15 @@ func (l *Logger) Namespace(name string) *Logger {
 		indent:          l.indent,
 		stackBufferSize: l.stackBufferSize,
 		separator:       l.separator,
-		suspend:         l.suspend,
+		fatalExits:      l.fatalExits,
+		fatalStack:      l.fatalStack,
 	}
+	// Atomic fields must be copied by value assignment, never by struct copy (go vet).
+	child.enabled.Store(l.enabled.Load())
+	child.suspend.Store(l.suspend.Load())
+	child.labels.Store(l.labels.Load())
+	child.publish()
+	return child
 }
 
 // NamespaceDisable disables logging for a namespace and its children, invalidating the
@@ -1046,6 +1321,7 @@ func (l *Logger) Prefix(prefix string) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.prefix = prefix
+	l.publish()
 	return l
 }
 
@@ -1063,7 +1339,7 @@ func (l *Logger) Print(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-	l.log(lx.LevelNone, lx.ClassRaw, cat.Space(args...), nil, false)
+	l.logChecked(lx.LevelNone, lx.ClassRaw, cat.Space(args...), nil, false)
 }
 
 // Println logs a message at Info level without format specifiers, minimizing allocations
@@ -1080,7 +1356,7 @@ func (l *Logger) Println(args ...any) {
 	if !l.shouldLog(lx.LevelInfo) {
 		return
 	}
-	l.log(lx.LevelNone, lx.ClassRaw, cat.SuffixWith(lx.Space, lx.Newline, args...), nil, false)
+	l.logChecked(lx.LevelNone, lx.ClassRaw, cat.SuffixWith(lx.Space, lx.Newline, args...), nil, false)
 }
 
 // Printf logs a formatted message at Info level, delegating to Print. It is thread-safe.
@@ -1129,6 +1405,7 @@ func (l *Logger) Separator(separator string) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.separator = separator
+	l.publish()
 	return l
 }
 
@@ -1191,6 +1468,7 @@ func (l *Logger) StackSize(size int) *Logger {
 	if size > 0 {
 		l.stackBufferSize = size
 	}
+	l.publish()
 	return l
 }
 
@@ -1205,6 +1483,7 @@ func (l *Logger) Style(style lx.StyleType) *Logger {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.style = style
+	l.publish()
 	return l
 }
 
@@ -1257,6 +1536,7 @@ func (l *Logger) Use(fn lx.Handler) *Middleware {
 	id := len(l.middleware) + 1
 	// Append middleware to the chain
 	l.middleware = append(l.middleware, Middleware{id: id, fn: fn})
+	l.publish()
 	return &Middleware{
 		logger: l,
 		id:     id,
@@ -1277,7 +1557,7 @@ func (l *Logger) Warn(args ...any) {
 	if !l.shouldLog(lx.LevelWarn) {
 		return
 	}
-	l.log(lx.LevelWarn, lx.ClassText, cat.Space(args...), nil, false)
+	l.logChecked(lx.LevelWarn, lx.ClassText, cat.Space(args...), nil, false)
 }
 
 // Warnf logs a formatted message at Warn level, delegating to Warn. It is thread-safe.
@@ -1341,13 +1621,38 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	if !l.shouldLog(level) {
 		return
 	}
+	l.emit(level, class, msg, fields, withStack)
+}
+
+// logChecked emits an entry whose level was already validated via shouldLog.
+// It exists so the hot path performs the (comparatively expensive) enablement
+// check exactly once instead of repeating it for every layer (Logger method →
+// FieldBuilder/SinceBuilder → log).
+func (l *Logger) logChecked(level lx.LevelType, class lx.ClassType, msg string, fields lx.Fields, withStack bool) {
+	l.emit(level, class, msg, fields, withStack)
+}
+
+// shortPath returns the base name of a source file path.
+func shortPath(file string) string {
+	if idx := strings.LastIndex(file, "/"); idx >= 0 {
+		return file[idx+1:]
+	}
+	return file
+}
+
+// emit builds the entry and hands it to the middleware chain and handler.
+// It performs no level/enablement checks (callers do), but it does honour
+// Suspend so that paths which bypass Logger methods (FieldBuilder, Line,
+// logWriter) are still suppressed.
+func (l *Logger) emit(level lx.LevelType, class lx.ClassType, msg string, fields lx.Fields, withStack bool) {
+	if l.suspend.Load() {
+		return
+	}
 
 	var stack []byte
 	// Capture stack trace if requested (outside lock)
 	if withStack {
-		l.mu.RLock()
-		size := l.stackBufferSize
-		l.mu.RUnlock()
+		size := l.config().stackSize
 
 		buf := stackBufPool.Get().([]byte)
 		if cap(buf) < size {
@@ -1360,32 +1665,37 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 		stackBufPool.Put(buf)
 	}
 
-	// Read-only config snapshot (minimal lock scope)
-	l.mu.RLock()
-	handler := l.handler
-	prefix := l.prefix
-	indent := l.indent
-	context := l.context
-	style := l.style
-	currentPath := l.currentPath
-	middleware := l.middleware
-	l.mu.RUnlock()
+	// Read the published configuration snapshot: a single atomic load, no locking.
+	c := l.config()
+	handler := c.handler
+	prefix := c.prefix
+	indent := c.indent
+	context := c.context
+	style := c.style
+	currentPath := c.path
+	middleware := c.middleware
 
-	// Apply prefix and indentation to the message (outside lock)
-	var builder strings.Builder
-	// Optimization: Pre-grow buffer if indent/prefix known
-	if indent > 0 {
+	// Capture the caller location when enabled (opt-in: it walks the stack).
+	var caller string
+	if c.caller {
+		if file, line, ok := callerFrame(0); ok {
+			caller = shortPath(file) + ":" + strconv.Itoa(line)
+		}
+	}
+
+	// Apply prefix and indentation to the message. When neither is configured
+	// (the common case) the message is passed through without copying.
+	finalMsg := msg
+	if indent > 0 || prefix != "" {
+		var builder strings.Builder
 		builder.Grow(indent*2 + len(prefix) + len(msg))
-		builder.WriteString(strings.Repeat(lx.DoubleSpace, indent))
-	} else {
-		builder.Grow(len(prefix) + len(msg))
-	}
-
-	if prefix != "" {
+		if indent > 0 {
+			builder.WriteString(strings.Repeat(lx.DoubleSpace, indent))
+		}
 		builder.WriteString(prefix)
+		builder.WriteString(msg)
+		finalMsg = builder.String()
 	}
-	builder.WriteString(msg)
-	finalMsg := builder.String()
 
 	// Optimized field merging - avoid allocation when possible
 	var combinedFields lx.Fields
@@ -1406,12 +1716,17 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	// Get entry from pool
 	entry := entryPool.Get().(*lx.Entry)
 
-	// Ensure pool return on ALL paths (including middleware errors)
+	// Ensure pool return on ALL paths (including middleware errors).
+	// Fields/Stack are cleared so the pool never retains a reference to a
+	// caller-owned or pooled backing array after the entry is recycled.
 	defer func() {
-		// Reset slices to zero length but keep capacity for pool reuse
-		entry.Fields = entry.Fields[:0]
-		entry.Stack = entry.Stack[:0]
+		entry.Fields = nil
+		entry.Stack = nil
 		entryPool.Put(entry)
+		if pooledFields != nil {
+			*pooledFields = (*pooledFields)[:0]
+			fieldsSlicePool.Put(pooledFields)
+		}
 	}()
 
 	entry.Timestamp = time.Now()
@@ -1421,6 +1736,7 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	entry.Fields = combinedFields
 	entry.Style = style
 	entry.Class = class
+	entry.Caller = caller
 	entry.Stack = stack
 	entry.Error = nil
 	entry.Id = 0
@@ -1441,13 +1757,17 @@ func (l *Logger) log(level lx.LevelType, class lx.ClassType, msg string, fields 
 	// Defer handles pool return
 }
 
-// shouldLog determines if a log should be emitted based on enabled state, level, namespaces,
-// sampling, and rate limits, caching namespace results for performance. It is thread-safe
-// with a read lock.
+// shouldLog determines if a log should be emitted based on enabled state, level,
+// namespaces, sampling, and rate limits, caching namespace results for performance.
+// It is thread-safe (lock-free on the common path).
+//
+// Note: levels are compared numerically (None=0 … Debug=5), so a lower value acts
+// as the "minimum" threshold: a message is emitted when its level does not exceed
+// the configured one.
 // Example (internal usage):
 //
 //	logger := New("app").Enable().Level(lx.LevelWarn)
-//	if logger.shouldLog(lx.LevelInfo) { // false
+//	if logger.shouldLog(lx.LevelInfo) { // true under numeric ordering
 //	    // Log would be skipped
 //	}
 func (l *Logger) shouldLog(level lx.LevelType) bool {
@@ -1456,23 +1776,59 @@ func (l *Logger) shouldLog(level lx.LevelType) bool {
 		return false
 	}
 
-	// Atomic fast path: read level without lock
-	if level > lx.LevelType(atomic.LoadInt32(&l.atomicLevel)) {
-		return false
-	}
-	// Check namespace rules if path is set (minimal lock scope)
-	if l.currentPath != "" {
-		separator := l.separator
-		if separator == "" {
-			separator = lx.Slash
-		}
-		isEnabledByNSRule, isDisabledByNSRule := l.namespaces.Enabled(l.currentPath, separator)
-		if isDisabledByNSRule {
+	// Level threshold: lock-free read of the configured minimum.
+	min := lx.LevelType(atomic.LoadInt32(&l.atomicLevel))
+	if l.ordered.Load() {
+		// Opt-in severity ordering (see WithOrderedLevels).
+		if level.Severity() < min.Severity() {
 			return false
 		}
-		if isEnabledByNSRule {
-			return true
+	} else if level > min {
+		return false
+	}
+
+	// Common case: no namespace rules or levels were ever registered, so
+	// namespace state cannot override the logger's own enable flag. This avoids
+	// the sync.Map lookups that used to happen on every single log call.
+	if !l.namespaces.HasRules() && !l.namespaces.HasLevels() {
+		return l.enabled.Load() == lx.Active
+	}
+
+	return l.namespaceLogs(level)
+}
+
+// namespaceLogs resolves the (rare) case where explicit namespace rules exist.
+// The path/separator are read under the read lock to stay race-free with
+// Separator()/NamespaceEnable() during runtime reconfiguration.
+func (l *Logger) namespaceLogs(level lx.LevelType) bool {
+	c := l.config()
+	currentPath := c.path
+	separator := c.separator
+
+	if currentPath == "" {
+		return l.enabled.Load() == lx.Active
+	}
+	if separator == "" {
+		separator = lx.Slash
+	}
+
+	// Per-namespace threshold (NamespaceLevel). It always uses severity ordering:
+	// it is a new API, so there is no legacy numeric behaviour to preserve, and
+	// "only Warn and above" is the only sensible reading of a namespace level.
+	if nsLevel, ok := l.namespaces.Level(currentPath, separator); ok {
+		if level.Severity() < nsLevel.Severity() {
+			return false
 		}
 	}
+
+	// Check namespace rules
+	isEnabledByNSRule, isDisabledByNSRule := l.namespaces.Enabled(currentPath, separator)
+	if isDisabledByNSRule {
+		return false
+	}
+	if isEnabledByNSRule {
+		return true
+	}
+	// Fall back to logger's enabled state
 	return l.enabled.Load() == lx.Active
 }

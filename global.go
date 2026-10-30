@@ -1,6 +1,7 @@
 package ll
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
@@ -714,4 +715,39 @@ func Apply(opts ...Option) *Logger {
 
 func Toggle(v bool) *Logger {
 	return defaultLogger.Toggle(v)
+}
+
+// Log logs a message at an arbitrary level using the default logger.
+// Example:
+//
+//	ll.Log(lx.LevelWarn, "disk", "almost full")
+func Log(level lx.LevelType, args ...any) {
+	defaultLogger.Log(level, args...)
+}
+
+// Logf logs a formatted message at an arbitrary level using the default logger.
+// Example:
+//
+//	ll.Logf(lx.LevelError, "%d requests failed", n)
+func Logf(level lx.LevelType, format string, args ...any) {
+	defaultLogger.Logf(level, format, args...)
+}
+
+// Ctx derives a logger from the default logger carrying fields extracted from ctx
+// (see WithContextExtractor).
+// Example:
+//
+//	ll.Ctx(r.Context()).Info("handled")
+func Ctx(ctx context.Context) *Logger {
+	return defaultLogger.Ctx(ctx)
+}
+
+// Flush flushes buffered handlers attached to the default logger.
+func Flush() error {
+	return defaultLogger.Flush()
+}
+
+// Close flushes and closes handlers attached to the default logger.
+func Close() error {
+	return defaultLogger.Close()
 }

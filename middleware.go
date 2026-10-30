@@ -46,6 +46,7 @@ func (m *Middleware) Remove() {
 			last := len(m.logger.middleware) - 1
 			m.logger.middleware[i] = m.logger.middleware[last]
 			m.logger.middleware = m.logger.middleware[:last]
+			m.logger.publish() // keep the hot-path snapshot in sync
 			return
 		}
 	}

@@ -327,27 +327,12 @@ func (sb *SinceBuilder) logAtLevel(level lx.LevelType, msg string) time.Duration
 
 	duration := time.Since(sb.start)
 
-	// Build final fields in this order:
-	// 1. Logger context fields (from logger.context)
-	// 2. Builder fields (from sb.fields)
-	// 3. Duration fields (always last)
-
-	// Pre-allocate with exact capacity
-	totalFields := 0
-	if sb.logger.context != nil {
-		totalFields += len(sb.logger.context)
-	}
-	if sb.fields != nil {
-		totalFields += len(sb.fields)
-	}
-	totalFields += 2 // duration_ms, duration
+	// Build the builder's own fields followed by the duration fields.
+	// The logger's context is NOT copied here: logChecked merges it as the
+	// leading fields, so copying it would duplicate every context field.
+	totalFields := len(sb.fields) + 2 // + duration_ms, duration
 
 	fields := make(lx.Fields, 0, totalFields)
-
-	// Add logger context fields first (preserves order)
-	if sb.logger.context != nil {
-		fields = append(fields, sb.logger.context...)
-	}
 
 	// Add builder fields
 	if sb.fields != nil {
@@ -360,7 +345,7 @@ func (sb *SinceBuilder) logAtLevel(level lx.LevelType, msg string) time.Duration
 		lx.Field{Key: "duration", Value: duration.String()},
 	)
 
-	sb.logger.log(level, lx.ClassTimed, msg, fields, false)
+	sb.logger.logChecked(level, lx.ClassTimed, msg, fields, false)
 	return duration
 }
 
