@@ -321,6 +321,47 @@ func BenchmarkSuspendCheck(b *testing.B) {
 	})
 }
 
+// BenchmarkOrderedLevelFiltered tests the opt-in severity filtering fast path:
+// entries below the threshold should cost a couple of nanoseconds.
+func BenchmarkOrderedLevelFiltered(b *testing.B) {
+	logger := ll.New("app",
+		ll.WithHandler(lh.NewTextHandler(io.Discard)),
+		ll.WithLevel(lx.LevelWarn),
+		ll.WithOrderedLevels(true),
+	).Enable()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			logger.Info("filtered out")
+		}
+	})
+}
+
+// BenchmarkDisabledFieldsLog tests Fields(...).Info(...) on a disabled logger.
+func BenchmarkDisabledFieldsLog(b *testing.B) {
+	logger := newTestLogger(lx.LevelDebug).Disable()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			logger.Fields("user", "alice", "action", "login").Info("skipped")
+		}
+	})
+}
+
+// BenchmarkLogAtLevel tests the dynamic-level entry point.
+func BenchmarkLogAtLevel(b *testing.B) {
+	logger := newTestLogger(lx.LevelDebug)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			logger.Log(lx.LevelInfo, "dynamic level")
+		}
+	})
+}
+
 // BenchmarkErrLogging tests error logging - Err() doesn't return value, so test differently
 func BenchmarkErrLogging(b *testing.B) {
 	logger := newTestLogger(lx.LevelDebug)
