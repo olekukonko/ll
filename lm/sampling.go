@@ -2,19 +2,22 @@ package lm
 
 import (
 	"fmt"
-	"math/rand"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/olekukonko/ll/lx"
 )
 
 // Sampling is a middleware that randomly samples log entries based on a rate per level.
 // It allows logs to pass through with a specified probability, tracking rejected logs in stats.
-// Thread-safe with a mutex for concurrent access to rates and stats maps.
+// It is safe for concurrent use: rates are read under a read lock and the random source
+// is a per-instance lock-free xorshift64 PRNG.
 type Sampling struct {
 	rates map[lx.LevelType]float64 // Sampling rates per log level (0.0 to 1.0)
 	stats map[lx.LevelType]int     // Count of rejected logs per level
-	mu    sync.Mutex               // Protects concurrent access to rates and stats
+	mu    sync.RWMutex             // Protects rates and stats maps
+	rng   atomic.Uint64            // Lock-free PRNG state (xorshift64)
 }
 
 // NewSampling creates a new Sampling middleware for a specific log level.
@@ -30,6 +33,8 @@ func NewSampling(level lx.LevelType, rate float64) *Sampling {
 		rates: make(map[lx.LevelType]float64), // Initialize empty rates map
 		stats: make(map[lx.LevelType]int),     // Initialize empty stats map
 	}
+	// Seed the PRNG so independent samplers do not produce identical sequences.
+	s.rng.Store(uint64(time.Now().UnixNano()) | 1)
 	// Set initial sampling rate for the specified level
 	s.Set(level, rate)
 	return s
@@ -59,21 +64,37 @@ func (s *Sampling) Set(level lx.LevelType, rate float64) *Sampling {
 //
 //	err := sampler.Handle(&lx.Entry{Level: lx.LevelDebug}) // Returns error if rejected
 func (s *Sampling) Handle(e *lx.Entry) error {
+	s.mu.RLock()
 	rate, exists := s.rates[e.Level] // Check if level has a sampling rate
+	s.mu.RUnlock()
 	if !exists {
-		// fmt.Printf("Sampling: Inactive rate for level %v\n", e.Level)
 		return nil // Inactive sampling for this level, allow log
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	random := rand.Float64() // Generate random number (0.0 to 1.0)
-	if random <= rate {
-		// fmt.Printf("Sampling: rate=%v, random=%v, allowing log\n", rate, random)
+	// Compare a uniform float in [0,1) against the configured rate.
+	if s.uniform() <= rate {
 		return nil // Allow log based on sampling rate
 	}
+	s.mu.Lock()
 	s.stats[e.Level]++ // Increment rejected log count
-	// fmt.Printf("Sampling: rate=%v, random=%v, rejecting log\n", rate, random)
+	s.mu.Unlock()
 	return fmt.Errorf("sampling error") // Reject log
+}
+
+// uniform returns a pseudo-random float64 in [0,1) using a lock-free xorshift64
+// PRNG. The previous implementation used the globally locked math/rand source
+// while holding the sampler mutex, which serialised every sampled log call.
+func (s *Sampling) uniform() float64 {
+	for {
+		old := s.rng.Load()
+		x := old
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		if s.rng.CompareAndSwap(old, x) {
+			// Use the top 53 bits for a uniform double in [0,1).
+			return float64(x>>11) / float64(uint64(1)<<53)
+		}
+	}
 }
 
 // GetStats returns a copy of the sampling statistics.

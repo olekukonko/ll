@@ -2,7 +2,6 @@ package lm
 
 import (
 	"fmt"
-	"hash/fnv"
 	"sync"
 	"time"
 
@@ -57,11 +56,11 @@ func (rl *RateLimiter) Set(level lx.LevelType, count int, interval time.Duration
 	return rl
 }
 
-// getShard returns the appropriate shard for a log level using FNV hash.
+// getShard returns the appropriate shard for a log level.
+// Levels are small integers, so a mask is both correct and allocation-free
+// (the previous FNV-hasher approach allocated a hasher and a byte slice per call).
 func (rl *RateLimiter) getShard(level lx.LevelType) *rateLimitShard {
-	h := fnv.New32a()
-	h.Write([]byte{byte(level)})
-	idx := h.Sum32() & (shardCount - 1)
+	idx := uint32(level) & (shardCount - 1)
 	return rl.shards[idx]
 }
 
@@ -78,28 +77,12 @@ func (rl *RateLimiter) Handle(e *lx.Entry) error {
 	limit := val.(*rateLimit)
 	now := time.Now().UnixNano()
 
-	// Check if interval passed
-	if now-limit.last >= limit.interval {
-		limit.mu.Lock()
-		// Double-check after acquiring lock
-		current := time.Now().UnixNano()
-		if current-limit.last >= limit.interval {
-			limit.last = current
-			limit.count = 1
-			limit.mu.Unlock()
-			return nil
-		}
-		limit.mu.Unlock()
-	}
-
-	// Increment count and check limit
 	limit.mu.Lock()
 	defer limit.mu.Unlock()
 
-	// Re-check interval in case another goroutine reset it
-	current := time.Now().UnixNano()
-	if current-limit.last >= limit.interval {
-		limit.last = current
+	// Interval elapsed (or first entry): start a new window and allow the entry.
+	if now-limit.last >= limit.interval {
+		limit.last = now
 		limit.count = 1
 		return nil
 	}
