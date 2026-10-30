@@ -5,15 +5,16 @@
 ## Key Features
 
 - **Logging Enabled by Default** - Zero configuration to start logging
-- **Hierarchical Namespaces** - Organize logs with fine-grained control over subsystems (e.g., "app/db")
+- **Hierarchical Namespaces** - Organize logs with fine-grained control over subsystems (e.g., "app/db"), including per-namespace level thresholds
 - **Structured Logging** - Add key-value metadata for machine-readable logs
 - **Middleware Pipeline** - Customize log processing with rate limiting, sampling, and deduplication
 - **Conditional & Error-Based Logging** - Optimize performance with fluent `If`, `IfErr`, `IfAny`, `IfOne` chains
 - **Multiple Output Formats** - Text, JSON, colorized ANSI, syslog, VictoriaLogs, and `slog` integration
 - **Advanced Debugging Utilities** - Source-aware `Dbg()`, hex/ASCII `Dump()`, private field `Inspect()`, and stack traces
-- **Production Ready** - Buffered batching, log rotation, duplicate suppression, and rate limiting
-- **Thread-Safe** - Built for high-concurrency with atomic operations, sharded mutexes, and lock-free fast paths
-- **Performance Optimized** - Zero allocations for disabled logs, sync.Pool buffers, LRU caching for source files
+- **Observability Hooks** - Dynamic-level `Log`/`Logf`, opt-in caller reporting, and `context.Context` field extraction
+- **Production Ready** - Buffered batching, log rotation, duplicate suppression, rate limiting, and `Flush`/`Close` plumbing
+- **Thread-Safe** - Built for high-concurrency with atomic operations, immutable config snapshots, and lock-free fast paths
+- **Performance Optimized** - Zero allocations for skipped logs, no message copying, `sync.Pool` buffers
 
 ## Installation
 
@@ -64,7 +65,37 @@ ll.Disable()  // Global shutdown
 ll.Enable()   // Reactivate
 ```
 
-### 2. Hierarchical Namespaces
+### 2. Log Levels
+
+`ll` keeps its historic numeric level ordering by default: an entry is emitted when
+its level value does **not exceed** the configured one. Since `LevelDebug` has the
+highest numeric value, `Level(LevelInfo)` suppresses Warn/Error/Fatal and
+`Level(LevelError)` still lets Info through — surprising, but it is what previous
+releases did, so it is preserved for compatibility.
+
+If you want a plain "minimum severity" threshold, opt in:
+
+```go
+logger := ll.New("app", ll.WithOrderedLevels(true)).Level(lx.LevelError)
+logger.Info("dropped")   // below threshold
+logger.Error("kept")     // emitted
+logger.Fatal("kept")     // Fatal is never filtered by a threshold
+
+// or at runtime
+logger.OrderedLevels(true)
+```
+
+Severity ranking is available as `lx.LevelType.Severity()`
+(Debug=0, Info/None=1, Warn=2, Error=3, Fatal=4).
+
+**Fatal does not exit by default.** `Fatal`/`Fatalf` log an entry; terminating the
+process is opt-in:
+
+```go
+logger := ll.New("app", ll.WithFatalExits(true), ll.WithFatalStack(true))
+```
+
+### 3. Hierarchical Namespaces
 
 Organize logs hierarchically with precise control over subsystems:
 
@@ -82,7 +113,7 @@ db.Info("Connected")     // Output: [app/database] INFO: Connected
 cache.Info("Hit")        // No output (disabled)
 ```
 
-### 3. Structured Logging with Ordered Fields
+### 4. Structured Logging with Ordered Fields
 
 Fields maintain insertion order and support fluent chaining:
 
@@ -105,7 +136,7 @@ logger.AddContext("environment", "production", "version", "1.2.3")
 logger.Info("Deployed")  // Output: ... [environment=production version=1.2.3]
 ```
 
-### 4. Conditional & Error-Based Logging
+### 5. Conditional & Error-Based Logging
 
 Optimize performance with fluent conditional chains that **completely skip processing** when conditions are false:
 
@@ -134,7 +165,7 @@ logger.
 
 **Performance**: When conditions are false, the logger returns immediately with zero allocations.
 
-### 5. Powerful Debugging Toolkit
+### 6. Powerful Debugging Toolkit
 
 `ll` includes advanced debugging utilities not found in standard logging libraries:
 
@@ -188,7 +219,7 @@ func process() {
 }
 ```
 
-### 6. Production-Ready Handlers
+### 7. Production-Ready Handlers
 
 ```go
 import (
@@ -219,7 +250,7 @@ defer buffered.Close()  // Ensures flush on exit
 // Syslog integration
 syslogHandler, _ := syslog.New(
     syslog.WithTag("myapp"),
-    syslog.WithFacility(syslog.LOG_LOCAL0),
+    syslog.WithFacility(stdsyslog.LOG_LOCAL0), // stdsyslog "log/syslog"
 )
 logger.Handler(syslogHandler)
 
@@ -228,12 +259,12 @@ victoriaHandler, _ := victoria.New(
     victoria.WithURL("http://victoria-logs:9428"),
     victoria.WithAppName("payment-service"),
     victoria.WithEnvironment("production"),
-    victoria.WithBatching(200, 5*time.Second),
+    victoria.WithBatching(200, 5*time.Second), // opt-in async NDJSON batching
 )
 logger.Handler(victoriaHandler)
 ```
 
-### 7. Middleware Pipeline
+### 8. Middleware Pipeline
 
 Transform, filter, or reject logs with a middleware pipeline:
 
@@ -259,7 +290,7 @@ logger.Use(ll.Middle(func(e *lx.Entry) error {
 }))
 ```
 
-### 8. Global Convenience API
+### 9. Global Convenience API
 
 Use package-level functions for quick logging without creating loggers:
 
@@ -280,6 +311,64 @@ func main() {
     ll.Inspect(complexStruct)
 }
 ```
+### 10. Dynamic Levels, Callers, Context Propagation & Lifecycle
+
+```go
+// Dynamic level (for adapters or runtime-selected severity)
+logger.Log(lx.LevelWarn, "disk", "almost full")
+logger.Logf(lx.LevelError, "%d requests failed", n)
+logger.Fields("user", "alice").Log(lx.LevelInfo, "login")
+
+// Caller reporting (opt-in: it walks the stack)
+logger := ll.New("app", ll.WithCaller(true))
+logger.Info("started") // [main.go:12] [app] INFO: started
+// JSON handler: {"ts":..,"lvl":"INFO","caller":"main.go:12",..}
+
+// context.Context propagation (trace/request ids) - any field extractor works
+logger := ll.New("app", ll.WithContextExtractor(func(ctx context.Context) []lx.Field {
+    return []lx.Field{{Key: "trace_id", Value: traceIDFrom(ctx)}}
+}))
+logger.Ctx(r.Context()).Info("handled") // includes trace_id
+
+// Per-namespace threshold (always severity based)
+logger.NamespaceLevel("app/db", lx.LevelWarn) // quiet the db subtree
+
+// Lifecycle: reach buffered/rotating handlers without keeping your own reference
+defer logger.Close() // flushes + closes (walks MultiHandler too)
+logger.Flush()       // flush only
+```
+
+**Handlers and entry ownership**: the logger recycles `*lx.Entry` (and its field
+slice) as soon as `Handle` returns. A handler that needs to keep an entry must
+copy it with `lh.CloneEntry` (as `lh.Buffered` and `lh.MemoryHandler` do).
+
+### 11. VictoriaLogs Delivery
+
+By default the VictoriaLogs handler sends each entry in its own HTTP request from
+the calling goroutine. For high-volume services enable batching to collapse N
+entries into one NDJSON request and move retries off the request path:
+
+```go
+vl, _ := victoria.New(
+    victoria.WithURL("http://victoria-logs:9428"),
+    victoria.WithBatching(500, 2*time.Second), // opt-in
+    victoria.WithRetry(3),
+    victoria.WithErrorHandler(func(err error) { /* async failures */ }),
+)
+defer vl.Close() // flushes the pending batch
+
+logger := ll.New("payment").Handler(vl)
+```
+
+If you would rather keep the handler untouched, wrap it with the generic buffer:
+
+```go
+logger := ll.New("payment").Handler(
+    lh.NewBuffered(vl, lh.WithBatchSize(500), lh.WithFlushInterval(2*time.Second)),
+)
+```
+
+
 
 ## Real-World Examples
 
@@ -343,7 +432,7 @@ func main() {
         victoria.WithAppName("payment-api"),
         victoria.WithEnvironment("production"),
         victoria.WithVersion("1.2.3"),
-        victoria.WithBatching(500, 2*time.Second),
+        victoria.WithBatching(500, 2*time.Second), // one HTTP request per 500 logs
         victoria.WithRetry(3),
     )
     defer vlHandler.Close()
@@ -365,23 +454,31 @@ func main() {
 
 ## Performance
 
-`ll` is engineered for high-performance environments:
+Benchmarks on Apple M3 Pro (Go 1.27, 12 CPUs, parallel, writing to `io.Discard`).
+`go test ./tests -bench . -benchmem`:
 
 | Operation | Time/op | Allocations |
 |-----------|---------|-------------|
-| **Disabled log** | **15.9 ns** | **0 allocs** |
-| Simple text log | 176 ns | 2 allocs |
-| With 2 fields | 383 ns | 4 allocs |
-| JSON output | 1006 ns | 13 allocs |
-| Namespace lookup (cached) | 550 ns | 6 allocs |
-| Deduplication | 214 ns | 2 allocs |
+| Skipped by level (ordered levels, opt-in) | **~2 ns** | **0** |
+| Disabled logger | ~7 ns | **0** |
+| Disabled logger + `Fields(...)` | ~10 ns | **0** |
+| Simple text log | ~118 ns | **0** |
+| With 2 context fields | ~118 ns | **0** |
+| With 3 explicit fields | ~122 ns | **0** |
+| `If(...)` conditional log | ~116 ns | **0** |
+| Colorized output | ~120 ns | **0** |
+| JSON output | ~177 ns | 2 (pooled objects) |
+| Multi-handler (2 sinks) | ~151 ns | 1 |
 
 **Key optimizations**:
-- Zero allocations when logs are skipped (conditional, disabled)
-- Atomic operations for hot paths
-- Sync.Pool for buffer reuse
-- LRU cache for source file lines (Dbg)
-- Sharded mutexes for deduplication
+- Zero allocations for skipped (disabled, filtered, false-conditional) logs
+- The message is no longer copied when no `Prefix`/`Indent` is configured
+- Configuration is published as an immutable snapshot: the hot path is lock-free
+- Namespace lookups are skipped entirely until a namespace rule/level exists
+- `sync.Pool` for buffers/entries, allocation-free namespace prefix walks
+
+Note: on darwin `time.Now()` alone costs ~30-45 ns, so it dominates the enabled
+path; the relative gains are larger on platforms with a cheaper clock.
 
 ## Why Choose `ll`?
 
@@ -399,18 +496,22 @@ func main() {
 | Rate limiting | ✅ | ❌ | ❌ | ❌ |
 | VictoriaLogs support | ✅ | ❌ | ❌ | ❌ |
 | Syslog support | ✅ | ❌ | ❌ | ✅ |
-| Zero-allocs disabled logs | ✅ | ❌ | ❌ | ❌ |
+| Dynamic level (`Log`) | ✅ | ✅ | ❌ | ❌ |
+| Caller reporting | ✅ | ✅ | ✅ | ✅ |
+| `context.Context` fields | ✅ | ✅ | ❌ | ❌ |
+| Per-namespace levels | ✅ | ❌ | ❌ | ❌ |
+| Zero-allocs skipped logs | ✅ | ✅ | ✅ | ❌ |
 | Thread-safe | ✅ | ✅ | ✅ | ✅ |
 
 ## Documentation
 
 - [GoDoc](https://pkg.go.dev/github.com/olekukonko/ll) - Full API documentation
 - [Examples](_example/) - Runable example code
-- [Benchmarks](tests/ll_bench_test.go) - Performance benchmarks
+- [Benchmarks](tests/bench_test.go) - Performance benchmarks
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! Please open an issue or a pull request.
 
 ## License
 
