@@ -21,7 +21,31 @@ var levelStrings = [7]string{
 // string representations for display in log output.
 type LevelType int
 
+// Severity returns the severity rank of a level, where a higher value is more
+// severe: Debug=0, Info/None=1, Warn=2, Error=3, Fatal=4 (Unknown behaves like Info).
+//
+// The numeric value of a LevelType is an ordering artifact (Debug is the highest
+// number), so threshold checks based on "minimum severity" must use this rank.
+// It is used by Logger.OrderedLevels / WithOrderedLevels.
+func (l LevelType) Severity() int {
+	switch l {
+	case LevelDebug:
+		return 0
+	case LevelNone, LevelInfo:
+		return 1
+	case LevelWarn:
+		return 2
+	case LevelError:
+		return 3
+	case LevelFatal:
+		return 4
+	default:
+		return 1
+	}
+}
+
 // String converts a LevelType to its string representation.
+
 // It maps each level constant to a human-readable string, returning "UNKNOWN" for invalid levels.
 // Used by handlers to display the log level in output.
 // Example:
@@ -67,6 +91,9 @@ func LevelParse(s string) LevelType {
 // content, namespace, metadata, and formatting style. Handlers process Entry instances
 // to produce formatted output (e.g., text, JSON). The struct is immutable once created,
 // ensuring thread-safety in handler processing.
+//
+// Note: entries are pooled by the logger and recycled as soon as Handle returns.
+// Handlers that need to keep an entry must deep-copy it (see lh.CloneEntry).
 type Entry struct {
 	Timestamp time.Time // Time the log was created
 	Level     LevelType // Severity level of the log (Debug, Info, Warn, Error, None)
@@ -77,6 +104,7 @@ type Entry struct {
 	Error     error     // Associated error, if any (e.g., for error logs)
 	Class     ClassType // Type of log entry (Text, JSON, Dump, Special, Raw)
 	Stack     []byte    // Stack trace data (if present)
+	Caller    string    // Caller location ("file.go:42") when caller reporting is enabled
 	Id        int       `json:"-"` // Unique ID for the entry, ignored in JSON output
 }
 

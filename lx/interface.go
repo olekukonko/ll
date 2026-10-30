@@ -66,6 +66,25 @@ type Timestamper interface {
 // that adds functionality (like filtering, transformation, or routing).
 type Wrap func(next Handler) Handler
 
+// Flusher is implemented by handlers that buffer entries internally
+// (e.g. lh.Buffered) so the logger can force a flush.
+type Flusher interface {
+	Flush()
+}
+
+// Closer is implemented by handlers that hold resources or background workers
+// (e.g. lh.Buffered, lh.Rotating, l3rd/victoria) so the logger can close them.
+type Closer interface {
+	Close() error
+}
+
+// Walker is implemented by handlers that fan out to other handlers
+// (e.g. lh.MultiHandler). Logger.Flush/Logger.Close use it to reach nested
+// handlers without knowing their concrete types.
+type Walker interface {
+	Walk(fn func(Handler))
+}
+
 // Deduper defines how to calculate a deduplication key for an entry.
 type Deduper interface {
 	Calculate(*Entry) uint64
