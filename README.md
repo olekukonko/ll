@@ -281,6 +281,19 @@ logger.Use(sampler)
 deduper := lh.NewDedup(logger.GetHandler(), 2*time.Second)
 logger.Handler(deduper)
 
+// Same, but report how many duplicates each burst swallowed. The count is only
+// final when the window closes, so it is one extra line per burst, not per
+// duplicate, and costs one allocation per window.
+reporting := lh.NewDedup(logger.GetHandler(), 5*time.Second,
+    lh.WithDedupSummary(""),                                  // field name "dup"
+    lh.WithDedupIgnore("duration", "interval", "delay"),
+)
+logger.Handler(reporting)
+// [app] INFO: upstream timeout [duration=12ms dup=42 dup_w=5s]
+//
+// Out of band, with no extra log lines: reporting.Suppressed(),
+// reporting.Stats(), reporting.Report().
+
 // Custom middleware
 logger.Use(ll.Middle(func(e *lx.Entry) error {
     if strings.Contains(e.Message, "password") {
